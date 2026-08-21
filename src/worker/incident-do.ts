@@ -7,13 +7,24 @@ import type { IncidentActor } from "./incident-client.js";
 import { buildOrchestrator, waitUntilScheduler } from "./wiring.js";
 
 /**
+ * The one thing this object keeps in its own storage: which incident its alarm belongs to. Why the
+ * alarm was set is on the incident row instead, so the alarm and the reconciliation sweep that
+ * backs it up read one answer rather than two that can disagree.
+ */
+const WAKE_KEY = "wake";
+
+type PendingWake = { incidentId: string };
+
+/**
  * One object per incident. Addressing alone is what that buys: every message about an incident is
  * routed to the same instance. It is not, on its own, serialisation. Cloudflare's input gate defers
  * incoming events only while one of the object's OWN storage operations is in flight, and this
  * lifecycle awaits D1 and the call provider rather than ctx.storage, so without the section below
  * two deliveries interleave freely and both act on state neither has written yet.
  *
- * Phase 3 adds the escalation alarm here.
+ * The alarm is the second thing an object buys, and it is the only precise timer Ringbolt has. The
+ * cron sweep runs once a minute and covers a lost alarm; escalating on no answer, calling back
+ * after a snooze, and resuming after quiet hours are all driven from here.
  */
 export class IncidentDurableObject
   extends DurableObject<Bindings>
@@ -38,12 +49,50 @@ export class IncidentDurableObject
     await this.orchestrator().closeStalled(incidentId, reason);
   }
 
+  async wake(incidentId: string): Promise<void> {
+    await this.orchestrator().wake(incidentId);
+  }
+
+  /**
+   * The scheduled time has arrived. The key is cleared before the work runs rather than after,
+   * because the work usually sets the next alarm itself, and deleting afterwards would throw that
+   * one away. An alarm that fires with nothing recorded is not an error: it is what a cancelled
+   * wake looks like when the platform had already committed to delivering it.
+   */
+  override async alarm(): Promise<void> {
+    const pending = await this.ctx.storage.get<PendingWake>(WAKE_KEY);
+    if (pending === undefined) return;
+    await this.ctx.storage.delete(WAKE_KEY);
+    await this.orchestrator().wake(pending.incidentId);
+  }
+
   private orchestrator() {
     const config = readConfig(this.env);
     return buildOrchestrator(this.env, config, {
       scheduler: waitUntilScheduler(this.ctx),
       exclusive: (work) => this.exclusive(work),
+      wake: {
+        schedule: (incidentId, at) => this.scheduleWake(incidentId, at),
+        clear: (incidentId) => this.clearWake(incidentId),
+      },
     });
+  }
+
+  private async scheduleWake(incidentId: string, at: Date): Promise<void> {
+    await this.ctx.storage.put<PendingWake>(WAKE_KEY, { incidentId });
+    await this.ctx.storage.setAlarm(at);
+  }
+
+  /**
+   * Only the incident that owns the pending wake may cancel it. This object outlives any one
+   * incident, since it is addressed by the fingerprint they share, so a finished incident dropping
+   * whatever alarm it happened to find would silently disarm its successor.
+   */
+  private async clearWake(incidentId: string): Promise<void> {
+    const pending = await this.ctx.storage.get<PendingWake>(WAKE_KEY);
+    if (pending?.incidentId !== incidentId) return;
+    await this.ctx.storage.delete(WAKE_KEY);
+    await this.ctx.storage.deleteAlarm();
   }
 
   /**

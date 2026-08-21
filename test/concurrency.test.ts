@@ -9,7 +9,12 @@ import {
 } from "../src/domain/incident.js";
 import type { Exclusive } from "../src/domain/orchestrator.js";
 import { readConfig } from "../src/worker/env.js";
-import { buildOrchestrator, immediateScheduler } from "../src/worker/wiring.js";
+import {
+  buildOrchestrator,
+  immediateScheduler,
+  unscheduledWakes,
+} from "../src/worker/wiring.js";
+import { resetTables } from "./support/reset.js";
 
 const TOKEN = "test-intake-token-0123456789";
 
@@ -33,6 +38,7 @@ function orchestratorWith(exclusive: Exclusive) {
   return buildOrchestrator(env, readConfig(env), {
     scheduler: immediateScheduler,
     exclusive,
+    wake: unscheduledWakes,
   });
 }
 
@@ -83,17 +89,7 @@ const repeatedAlert: AlertPayload = {
 
 describe("two messages about one incident", () => {
   beforeEach(async () => {
-    for (const table of [
-      "incident_events",
-      "action_runs",
-      "processed_events",
-      "call_ledger",
-      "incidents",
-      "service_state",
-      "fake_calls",
-    ]) {
-      await env.DB.prepare(`DELETE FROM ${table}`).run();
-    }
+    await resetTables(env.DB);
   });
 
   /**
@@ -205,12 +201,18 @@ describe("two messages about one incident", () => {
    * comment on each.
    */
   it("keeps the database index and the duplicate check on one list of open states", () => {
-    const index = env.TEST_MIGRATIONS.flatMap(
+    // The LAST create wins, because a later migration drops the index and rebuilds it with a longer
+    // list of states. Reading the first one would compare against an index that no longer exists.
+    const creates = env.TEST_MIGRATIONS.flatMap(
       (migration) => migration.queries,
-    ).find((query) => query.includes("incidents_one_open_per_fingerprint"));
-    expect(index).toBeDefined();
+    ).filter(
+      (query) =>
+        query.includes("incidents_one_open_per_fingerprint") &&
+        /CREATE\s+UNIQUE\s+INDEX/i.test(query),
+    );
+    expect(creates.length).toBeGreaterThan(0);
 
-    const listed = [...(index ?? "").matchAll(/'([a-z_]+)'/g)].map(
+    const listed = [...(creates.at(-1) ?? "").matchAll(/'([a-z_]+)'/g)].map(
       (match) => match[1],
     );
     expect(listed.sort()).toEqual([...openIncidentStates].sort());

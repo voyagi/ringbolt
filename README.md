@@ -26,23 +26,49 @@ alert  ->  policy  ->  phone call  ->  spoken decision  ->  authorization  ->  a
 ```
 
 1. Any monitor posts an alert to an intake endpoint. The payload is plain JSON, so a curl works.
-2. Repeats of the same problem collapse into one incident, and the remediation actions that may be
-   offered for that service are read out on the call.
-3. It places a call through CALL-E, carrying the incident facts and a result schema that forces a
-   structured decision back rather than a paragraph of prose.
+2. Policy decides whether this is worth waking anybody: the service's severity threshold, its quiet
+   hours, whether the same problem has already rung a phone recently, and which remediation actions
+   may be put on the call.
+3. It places a call through CALL-E to whoever is at the top of that service's rotation, carrying the
+   incident facts and a result schema that forces a structured decision back rather than a paragraph
+   of prose.
 4. The responder asks whatever they need to, then says what to do.
 5. The decision is verified before anything happens. Only then does the action run.
 6. Incident, transcript, decision, authorizer, action, and the system state before and after all
    land in one record.
+7. Nobody picks up, and the next person in the rotation is called instead.
 
-A webhook that never arrives does not lose the decision. A sweep re-reads any call that has not
-reported back: one that finished is carried through exactly as the webhook would have, and one that
-never finished is handed to escalation rather than left sitting there. Nothing an incident can do
-leaves it stuck, because an incident that is stuck is an alert that has silently stopped ringing.
+A webhook that never arrives does not lose the decision. Every incident Ringbolt parks carries the
+time it is due to be looked at again, and its own Durable Object holds an alarm for that time: a
+call that nobody answers, a snooze the responder asked for, quiet hours that have ended. A sweep
+runs once a minute behind all of that as the backstop for an alarm that was lost with the isolate
+that set it, and it wakes an incident by calling the identical code the alarm would have called.
+Nothing an incident can do leaves it stuck, because an incident that is stuck is an alert that has
+silently stopped ringing.
 
-Two steps of that list are still ahead of the code, and the Status section below says where they
-are: the routing policy that decides whether an alert is worth a call at all, and the rotation that
-moves to the next person when nobody answers.
+One step of that list is still ahead of the code, and the Status section below says where it is:
+runbook actions are hardcoded rather than defined by an operator.
+
+## One broken thing is one phone call
+
+Three separate rules, because a pager that cries wolf gets ignored, and an ignored pager is worse
+than no pager.
+
+**Repeats collapse.** While an incident is open, every repeat of the same alert attaches to it. The
+grouping is the sender's own fingerprint when it sends one, and service plus title when it does not,
+and it is enforced by a unique index rather than by a check in application code.
+
+**A service that flaps is suppressed.** Once an incident closes, the next repeat is compared against
+the calls already placed about that exact problem inside a window. Past the allowance for that
+window it opens an incident, records that it did, and telephones nobody. When the window rolls off,
+the suppressed incident closes rather than turning into a late call: it exists because that problem
+already rang a phone, and ringing an hour afterwards is the thing suppression is for. The next
+repeat after that is judged afresh.
+
+**Quiet hours hold, they do not drop.** An alert below the severity that is allowed to break a
+service's quiet hours is parked until the window ends and then called about, in the window's own
+time zone. An unresolvable zone rings rather than holds, because the wrong way to fail on a
+configuration mistake is silence.
 
 ## Two properties this is built around
 
@@ -103,6 +129,34 @@ enforced rather than documented. `/api/budget` reports what is left, the adapter
 call once the count is reached and sends nothing when it refuses, and reading calls back keeps
 working so incidents already in flight still finish.
 
+A live build also dials only numbers named in `LIVE_CALL_ALLOWLIST`, plus `DEMO_PHONE`, which is
+always on the list. A rotation can name any contact anybody has added, so without that the set of
+telephones a deployment can reach would be a database table rather than something an operator wrote
+down.
+
+## Who gets called
+
+Contacts and rotations live under `/api/config`, which is the whole of the configuration surface:
+service policy, contacts, rotations, and the actions a policy may permit.
+
+```bash
+curl -X POST http://localhost:8787/api/config/contacts \
+  -H 'content-type: application/json' \
+  -d '{"name":"Kim","phone":"+31612345678"}'
+
+curl -X PUT http://localhost:8787/api/config/rotation/checkout \
+  -H 'content-type: application/json' \
+  -d '{"contactIds":["con_...","con_..."]}'
+```
+
+A service with no rotation of its own uses the shared one, named `*`. With no rotation at all,
+`DEMO_PHONE` is who gets called, so a fresh install still rings somebody rather than requiring the
+rota to be built before it can do anything.
+
+Those endpoints decide whose telephone rings, so outside development they refuse to serve until
+`ADMIN_TOKEN` is set, and then require it as a bearer token. That is a floor rather than the
+finished answer: real authentication is still ahead, and the Status section says so.
+
 ## The local stand-in
 
 Development runs against a fake CALL-E rather than the real one, because every real call spends
@@ -131,6 +185,11 @@ The gates were each proven to fail on a planted violation before being trusted: 
 thirty-one-branch function, a pasted block, an import cycle, and a type error each turn their gate
 red, and the clean tree passes all four.
 
+The behaviour is held to the same standard. Every claim above that a suite is supposed to defend
+was checked by breaking the code on purpose and watching the right test go red: escalating to the
+person already on the call, reusing one idempotency key across attempts, letting one more call
+through the suppression window, and never arming the alarm at all.
+
 ## Layout
 
 | Path          | What is in it                                                                              |
@@ -144,16 +203,19 @@ red, and the clean tree passes all four.
 
 ## Status
 
-Early. The loop runs end to end against the local stand-in: an alert becomes an incident, a call is
-placed, the decision that comes back is verified and authorized, and the authorized action changes
-state that can be read back. The CALL-E adapter is built and switchable on, and it satisfies the
-same contract suite as the stand-in.
+The loop runs end to end against the local stand-in: an alert becomes an incident, policy decides
+whether it is worth a call, a call is placed to whoever is on the rota, the decision that comes back
+is verified and authorized, the authorized action changes state that can be read back, and a call
+nobody answers moves to the next person on a timer. The CALL-E adapter is built and switchable on,
+and it satisfies the same contract suite as the stand-in.
 
 Not built yet, and not pretended to be:
 
-- Routing policy. Every alert places a call, and every service is offered the same two actions.
-- Contacts and rotation. There is one number, so a call nobody answers goes to no one else.
+- Runbook actions as configuration. The two that exist are defined in code, not by an operator, and
+  a policy can only choose between them.
 - The dashboard. The API is there; the screens are not.
+- Authentication and per-tenant isolation. `/api/config` is guarded by one shared admin token, and
+  the read API is open. Both are stated here rather than left for somebody to discover.
 
 ## Licence
 

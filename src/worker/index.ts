@@ -1,21 +1,33 @@
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import {
   callIdFromDelivery,
   eventIdFromDelivery,
   verifyCall,
 } from "../calle/verify.js";
 import { REAL_CALL_ALLOWANCE, isTerminalCall } from "../calle/port.js";
-import { Repo } from "../db/repo.js";
+import { allActionIds, describeActions } from "../actions/registry.js";
+import { Repo, SHARED_ROTATION } from "../db/repo.js";
 import {
   type Incident,
   alertPayload,
   fingerprintFor,
 } from "../domain/incident.js";
 import { incidentIdOf } from "../domain/orchestrator.js";
-import { ConfigurationError, type Bindings, readConfig } from "./env.js";
+import {
+  type ServicePolicy,
+  defaultPolicy,
+  servicePolicyInput,
+} from "../domain/policy.js";
+import { contactInput, rotationInput } from "../domain/rotation.js";
+import {
+  ConfigurationError,
+  type Bindings,
+  type RingboltConfig,
+  readConfig,
+} from "./env.js";
 import { incidentStub } from "./incident-client.js";
 import { reconcile } from "./reconcile.js";
-import { buildPlacer, waitUntilScheduler } from "./wiring.js";
+import { buildPlacer, newId, waitUntilScheduler } from "./wiring.js";
 
 export { IncidentDurableObject } from "./incident-do.js";
 
@@ -173,6 +185,147 @@ app.get("/api/services/:service/state", async (c) => {
   return c.json({ state });
 });
 
+/**
+ * Everything that decides which telephone rings sits behind this. It is not authentication, which
+ * is phase 7: it is the floor until then, because an unguarded write here is a stranger's phone
+ * going off at three in the morning, charged against an allowance of twenty calls.
+ *
+ * The subtree is guarded in one place rather than route by route on purpose. A guard repeated at
+ * nine handlers is a guard that will eventually be missing from the tenth.
+ */
+app.use("/api/config/*", async (c, next) => {
+  const config = readConfig(c.env);
+  const refusal = adminRefusal(c, config);
+  if (refusal !== null) return refusal;
+  await next();
+  return undefined;
+});
+
+app.get("/api/config/actions", (c) => c.json({ actions: describeActions() }));
+
+app.get("/api/config/services", async (c) => {
+  const repo = new Repo(c.env.DB);
+  return c.json({ services: await repo.listServicePolicies() });
+});
+
+app.get("/api/config/services/:service", async (c) => {
+  const service = c.req.param("service");
+  const stored = await new Repo(c.env.DB).getServicePolicy(service);
+  return c.json({
+    policy:
+      stored ??
+      defaultPolicy(service, allActionIds(), new Date().toISOString()),
+    configured: stored !== null,
+  });
+});
+
+app.put("/api/config/services/:service", async (c) => {
+  const parsed = servicePolicyInput.safeParse(await readJson(c.req.raw));
+  if (!parsed.success) return unprocessable(c, parsed.error.issues);
+
+  const known = new Set(allActionIds());
+  const unknown = parsed.data.allowedActions.filter((id) => !known.has(id));
+  if (unknown.length > 0) {
+    return c.json(
+      {
+        error: `this build has no such action: ${unknown.join(", ")}`,
+        actions: allActionIds(),
+      },
+      422,
+    );
+  }
+
+  const policy: ServicePolicy = {
+    service: c.req.param("service"),
+    ...parsed.data,
+    updatedAt: new Date().toISOString(),
+  };
+  await new Repo(c.env.DB).upsertServicePolicy(policy);
+  return c.json({ policy });
+});
+
+app.get("/api/config/contacts", async (c) => {
+  const repo = new Repo(c.env.DB);
+  return c.json({ contacts: await repo.listContacts() });
+});
+
+app.post("/api/config/contacts", async (c) => {
+  const parsed = contactInput.safeParse(await readJson(c.req.raw));
+  if (!parsed.success) return unprocessable(c, parsed.error.issues);
+
+  const contact = {
+    id: newId("con"),
+    ...parsed.data,
+    createdAt: new Date().toISOString(),
+  };
+  await new Repo(c.env.DB).createContact(contact);
+  return c.json({ contact }, 201);
+});
+
+app.delete("/api/config/contacts/:id", async (c) => {
+  const repo = new Repo(c.env.DB);
+  const id = c.req.param("id");
+  if ((await repo.getContact(id)) === null)
+    return c.json({ error: "no such contact" }, 404);
+
+  // Deleting somebody who is still in a rota would shorten it silently, and a rotation that is one
+  // person shorter than the operator believes is discovered at three in the morning.
+  const rotas = await repo.rotationsNaming(id);
+  if (rotas.length > 0) {
+    return c.json(
+      {
+        error: `this contact is still in the rotation for ${rotas.join(", ")}, so take them out of it first`,
+        services: rotas,
+      },
+      409,
+    );
+  }
+
+  await repo.deleteContact(id);
+  return c.json({ ok: true });
+});
+
+app.get("/api/config/rotation/:service", async (c) => {
+  const repo = new Repo(c.env.DB);
+  const service = c.req.param("service");
+  const contacts = await repo.rotationFor(service);
+  return c.json({
+    service,
+    contacts,
+    own: await repo.hasOwnRotation(service),
+    sharedRotation: SHARED_ROTATION,
+    // With nobody in the rota, the number in the configuration is who gets called. Saying so is
+    // what stops an empty list reading as "this service calls nobody".
+    usesConfiguredNumber: contacts.length === 0,
+  });
+});
+
+app.put("/api/config/rotation/:service", async (c) => {
+  const parsed = rotationInput.safeParse(await readJson(c.req.raw));
+  if (!parsed.success) return unprocessable(c, parsed.error.issues);
+
+  const ids = parsed.data.contactIds;
+  if (new Set(ids).size !== ids.length) {
+    return c.json(
+      {
+        error:
+          "the same contact appears twice, so escalating would call them again instead of somebody else",
+      },
+      422,
+    );
+  }
+
+  const repo = new Repo(c.env.DB);
+  const known = new Set((await repo.listContacts()).map((one) => one.id));
+  const unknown = ids.filter((id) => !known.has(id));
+  if (unknown.length > 0)
+    return c.json({ error: `no such contact: ${unknown.join(", ")}` }, 422);
+
+  const service = c.req.param("service");
+  await repo.setRotation(service, ids);
+  return c.json({ service, contacts: await repo.rotationFor(service) });
+});
+
 app.get("/api/budget", async (c) => {
   const repo = new Repo(c.env.DB);
   const spent = await repo.countRealCalls();
@@ -203,6 +356,47 @@ function describeIssue(issue: {
   message: string;
 }): string {
   return `${issue.path.join(".") || "root"}: ${issue.message}`;
+}
+
+function unprocessable(
+  c: Context<{ Bindings: Bindings }>,
+  issues: { path: PropertyKey[]; message: string }[],
+): Response {
+  return c.json(
+    {
+      error: "that did not match the expected shape",
+      issues: issues.map(describeIssue),
+    },
+    422,
+  );
+}
+
+/**
+ * Null when the caller may change configuration, and the refusal to send back when they may not.
+ * Development with no token set is allowed through because that is a laptop talking to itself;
+ * every other environment refuses to serve these routes at all until a token exists, which fails
+ * closed rather than shipping an open door nobody notices.
+ */
+function adminRefusal(
+  c: Context<{ Bindings: Bindings }>,
+  config: RingboltConfig,
+): Response | null {
+  if (config.ADMIN_TOKEN === undefined) {
+    if (config.RINGBOLT_ENV === "development") return null;
+    return c.json(
+      {
+        error:
+          "changing configuration needs ADMIN_TOKEN to be set on this deployment",
+      },
+      503,
+    );
+  }
+
+  const header = c.req.header("authorization") ?? "";
+  const presented = header.startsWith("Bearer ") ? header.slice(7) : "";
+  if (!timingSafeEqual(presented, config.ADMIN_TOKEN))
+    return c.json({ error: "not authorized" }, 401);
+  return null;
 }
 
 /**
@@ -243,11 +437,8 @@ export default {
   async scheduled(
     _controller: ScheduledController,
     env: Bindings,
-    ctx: ExecutionContext,
+    _ctx: ExecutionContext,
   ): Promise<void> {
-    await reconcile(env, {
-      scheduler: waitUntilScheduler(ctx),
-      now: () => new Date(),
-    });
+    await reconcile(env, { now: () => new Date() });
   },
 };

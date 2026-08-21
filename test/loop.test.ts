@@ -2,6 +2,7 @@ import { SELF, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CallSnapshot } from "../src/calle/port.js";
 import { Repo } from "../src/db/repo.js";
+import { resetTables } from "./support/reset.js";
 
 const TOKEN = "test-intake-token-0123456789";
 
@@ -35,6 +36,39 @@ async function terminalCallFor(incidentId: string): Promise<CallSnapshot> {
   );
 }
 
+/**
+ * A call that has been placed and has not finished, put where the stand-in keeps its calls so that
+ * reading it back is deterministic rather than a race against the stand-in's own think time.
+ */
+async function aCallStillRinging(incidentId: string): Promise<CallSnapshot> {
+  const queued: CallSnapshot = {
+    id: `call_still_ringing_${incidentId}`,
+    status: "queued",
+    taskCompleted: null,
+    confidenceScore: null,
+    confidenceLabel: null,
+    structuredResult: null,
+    summary: null,
+    evidence: [],
+    transcript: [],
+    metadata: { incident_id: incidentId },
+    failureCode: null,
+  };
+
+  await env.DB.prepare(
+    `INSERT INTO fake_calls (id, idempotency_key, snapshot, updated_at) VALUES (?1, ?2, ?3, ?4)`,
+  )
+    .bind(
+      queued.id,
+      `${incidentId}:still-ringing`,
+      JSON.stringify(queued),
+      new Date().toISOString(),
+    )
+    .run();
+
+  return queued;
+}
+
 async function deliverWebhook(
   call: CallSnapshot,
   eventId = `evt_${crypto.randomUUID()}`,
@@ -53,17 +87,7 @@ async function deliverWebhook(
 
 describe("the whole loop", () => {
   beforeEach(async () => {
-    for (const table of [
-      "incident_events",
-      "action_runs",
-      "processed_events",
-      "call_ledger",
-      "incidents",
-      "service_state",
-      "fake_calls",
-    ]) {
-      await env.DB.prepare(`DELETE FROM ${table}`).run();
-    }
+    await resetTables(env.DB);
   });
 
   it("takes an alert all the way to a changed system", async () => {
@@ -207,10 +231,10 @@ describe("the whole loop", () => {
     });
     const accepted = (await response.json()) as { incident: string };
 
-    const stillRinging = await env.DB.prepare(
-      `SELECT snapshot FROM fake_calls`,
-    ).first<{ snapshot: string }>();
-    const queued = JSON.parse(stillRinging?.snapshot ?? "{}") as CallSnapshot;
+    // A second call for the same incident, written straight into the stand-in's store and left
+    // ringing. Reading the real one back would be a race against its own think time, and a test
+    // that sometimes reads a finished call is a test that sometimes proves nothing.
+    const queued = await aCallStillRinging(accepted.incident);
 
     const early = await SELF.fetch("https://ringbolt.test/webhooks/calle", {
       method: "POST",

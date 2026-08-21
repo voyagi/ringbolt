@@ -2,17 +2,22 @@ import {
   D1FakeCallStore,
   FakeCallPlacer,
   type FakeScenario,
+  type FakeScenarioKind,
 } from "../calle/fake.js";
 import { LiveCallPlacer } from "../calle/live.js";
 import type { CallPlacer, PlaceCallInput, Scheduler } from "../calle/port.js";
 import { Repo } from "../db/repo.js";
-import type { Exclusive } from "../domain/orchestrator.js";
+import type { Exclusive, WakeScheduler } from "../domain/orchestrator.js";
 import { Orchestrator } from "../domain/orchestrator.js";
-import type { Bindings, RingboltConfig } from "./env.js";
+import {
+  type Bindings,
+  type RingboltConfig,
+  allowedLiveNumbers,
+} from "./env.js";
 
 /**
- * Until phase 3 there is one responder, and in fake mode there is no number at all. It fails the
- * E.164 check that live mode's number has to pass, so it cannot become a real call.
+ * Dialled when nothing has been configured and no rotation exists. It fails the E.164 check live
+ * mode's number has to pass, so it cannot become a real call.
  */
 const UNCONFIGURED_RESPONDER = "+00000000000";
 
@@ -35,10 +40,21 @@ export const immediateScheduler: Scheduler = (_delayMs, run) => {
   void run();
 };
 
-function defaultScenario(
-  afterMs: number,
-): (input: PlaceCallInput) => FakeScenario {
-  return () => ({
+/**
+ * For a caller that drives the orchestrator without a Durable Object behind it, which in practice
+ * means a test. Nothing schedules an alarm, so nothing parked ever wakes up on its own: a test
+ * using this is responsible for calling wake() itself. The product never uses it, which is why
+ * buildOrchestrator demands a wake scheduler rather than quietly defaulting to this one.
+ */
+export const unscheduledWakes: WakeScheduler = {
+  schedule: async () => undefined,
+  clear: async () => undefined,
+};
+
+/** What the stand-in does on a call, chosen by configuration rather than by the code path. */
+function scenarioOf(kind: FakeScenarioKind, afterMs: number): FakeScenario {
+  if (kind !== "answers") return { kind, afterMs };
+  return {
     kind: "answers",
     afterMs,
     decision: {
@@ -46,7 +62,7 @@ function defaultScenario(
       action_id: "kill_switch",
       reason: "Turn it off while we look at it.",
     },
-  });
+  };
 }
 
 export type PlacerOptions = {
@@ -63,13 +79,18 @@ export type PlacerOptions = {
 };
 
 export type OrchestratorOptions = PlacerOptions & {
-  /** Fake mode only. Live mode dials the configured number and nothing else. */
+  /** Dialled when no rotation has been configured. Live mode uses the configured number. */
   responderPhone?: string;
   /**
    * Required rather than defaulted, because a default would be an unserialised one and the caller
    * that most needs the section is the one least likely to notice it is missing.
    */
   exclusive: Exclusive;
+  /**
+   * Required for the same reason: a default that quietly did nothing would leave every parked
+   * incident waiting for a timer nobody set.
+   */
+  wake: WakeScheduler;
 };
 
 export function buildPlacer(
@@ -85,6 +106,7 @@ export function buildPlacer(
       // The ledger is what the product reports at /api/budget, so the ceiling and the published
       // figure are the same count rather than two that can disagree.
       budget: { spent: () => new Repo(env.DB).countRealCalls() },
+      allowedNumbers: allowedLiveNumbers(config),
       ...(options.calleFetch === undefined
         ? {}
         : { fetchImpl: options.calleFetch }),
@@ -95,7 +117,9 @@ export function buildPlacer(
     store: new D1FakeCallStore(env.DB, now),
     scheduler: options.scheduler,
     scenarioFor:
-      options.scenarioFor ?? defaultScenario(config.CALLE_FAKE_DELAY_MS),
+      options.scenarioFor ??
+      (() =>
+        scenarioOf(config.CALLE_FAKE_SCENARIO, config.CALLE_FAKE_DELAY_MS)),
     now,
   });
 }
@@ -122,9 +146,10 @@ export function buildOrchestrator(
     repo: new Repo(env.DB),
     placer: buildPlacer(env, config, options),
     publicBaseUrl: config.PUBLIC_BASE_URL,
-    responderPhone: responderFor(config, options.responderPhone),
+    fallbackPhone: responderFor(config, options.responderPhone),
     now,
     newId,
     exclusive: options.exclusive,
+    wake: options.wake,
   });
 }

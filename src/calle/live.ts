@@ -14,6 +14,12 @@ type CalleFetch = (input: Request) => Promise<Response>;
 export type LiveOptions = {
   apiKey: string;
   budget: CallBudget;
+  /**
+   * Every number this adapter may dial. Required rather than optional: the rotation can name any
+   * contact anybody added, so the list of telephones a live build can reach has to be something an
+   * operator wrote down, and a caller that forgot to supply one should not compile.
+   */
+  allowedNumbers: readonly string[];
   /** The CALL-E API host. Defaults to the SDK's own, which is the production one. */
   baseUrl?: string;
   fetchImpl?: CalleFetch;
@@ -28,6 +34,17 @@ export class CallBudgetExhaustedError extends Error {
   }
 }
 
+export class NumberNotAllowedError extends Error {
+  constructor() {
+    // Deliberately does not repeat the number. This message reaches an audit record and an HTTP
+    // response, and a rejected number is still somebody's telephone number.
+    super(
+      "that number is not on this build's list of numbers it may call, so no call was placed",
+    );
+    this.name = "NumberNotAllowedError";
+  }
+}
+
 /**
  * The real telephone. It satisfies the same contract as the local stand-in and is held to it by the
  * same suite, which is the only way to know that code proven against the stand-in still holds here.
@@ -37,6 +54,7 @@ export class LiveCallPlacer implements CallPlacer {
 
   private readonly calle: CalleClient;
   private readonly budget: CallBudget;
+  private readonly allowedNumbers: ReadonlySet<string>;
 
   constructor(options: LiveOptions) {
     const clientOptions: CalleClientOptions = { apiKey: options.apiKey };
@@ -46,17 +64,25 @@ export class LiveCallPlacer implements CallPlacer {
 
     this.calle = new CalleClient(clientOptions);
     this.budget = options.budget;
+    this.allowedNumbers = new Set(options.allowedNumbers);
   }
 
   /**
-   * The allowance is checked here rather than at any one caller, because this is the line that
-   * spends it and a caller added later would not know to ask. It is a ceiling and not a lock: the
-   * ledger is written after CALL-E accepts the call, so placements still in flight are not counted
-   * yet and a simultaneous burst can overshoot by however many are in the air. The guard is aimed
-   * at the failure that would actually empty the allowance, which is a loop retrying, and that one
-   * is serial.
+   * Both guards are here rather than at any one caller, because this is the line that rings a real
+   * telephone and spends an allowance that cannot be topped up, and a caller added later would not
+   * know to ask.
+   *
+   * The number is checked first: a call to somebody who never agreed to be called is worse than a
+   * call one over budget, and refusing it costs nothing. The allowance is a ceiling and not a lock,
+   * since the ledger is written after CALL-E accepts, so placements still in flight are not counted
+   * yet and a simultaneous burst can overshoot by however many are in the air. It is aimed at the
+   * failure that would actually empty the allowance, which is a loop retrying, and that one is
+   * serial.
    */
   async place(input: PlaceCallInput): Promise<CallSnapshot> {
+    if (!this.allowedNumbers.has(input.phone))
+      throw new NumberNotAllowedError();
+
     const spent = await this.budget.spent();
     if (spent >= REAL_CALL_ALLOWANCE) throw new CallBudgetExhaustedError(spent);
 

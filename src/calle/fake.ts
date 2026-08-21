@@ -5,6 +5,20 @@ import type {
   Scheduler,
 } from "./port.js";
 
+/**
+ * The outcomes the stand-in can rehearse. Named here rather than only in the union below because
+ * the configuration picks one by name, which is how the escalation and refusal paths are exercised
+ * without spending a real call on each of them.
+ */
+export const fakeScenarioKinds = [
+  "answers",
+  "no_answer",
+  "hangs_up",
+  "unparseable",
+] as const;
+
+export type FakeScenarioKind = (typeof fakeScenarioKinds)[number];
+
 export type FakeScenario =
   | {
       kind: "answers";

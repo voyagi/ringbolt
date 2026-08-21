@@ -4,17 +4,42 @@ import type {
   IncidentState,
   Severity,
 } from "../domain/incident.js";
-import { openIncidentStates } from "../domain/incident.js";
+import { isWakeReason, openIncidentStates } from "../domain/incident.js";
+import type { QuietHours, ServicePolicy } from "../domain/policy.js";
+import { quietHoursInput } from "../domain/policy.js";
+import type { Contact } from "../domain/rotation.js";
 
 const OPEN_STATES = openIncidentStates.map((state) => `'${state}'`).join(", ");
 
+/** Every state Ringbolt parks an incident in with a time on it, as a SQL list. */
+const SCHEDULED_STATES = "'deferred', 'muted', 'snoozed'";
+
+/** Every state an incident can sit in while something is supposed to be happening to it. */
+const ACTIVE_STATES =
+  "'received', 'calling', 'deciding', 'acting', 'escalating'";
+
+/** The rota a service falls back to when it has none of its own. */
+export const SHARED_ROTATION = "*";
+
 export type IncidentPatch = Partial<
-  Pick<Incident, "state" | "callId" | "outcome" | "wakeAt" | "offeredActions">
+  Pick<
+    Incident,
+    | "state"
+    | "callId"
+    | "outcome"
+    | "wakeAt"
+    | "wakeReason"
+    | "offeredActions"
+    | "callAttempts"
+    | "rotationPosition"
+    | "contactId"
+    | "callStartedAt"
+  >
 >;
 
 function encodePatchValue(
   value: IncidentPatch[keyof IncidentPatch],
-): string | null {
+): string | number | null {
   if (value === undefined || value === null) return null;
   return Array.isArray(value) ? JSON.stringify(value) : value;
 }
@@ -61,11 +86,37 @@ type IncidentRow = {
   links: string | null;
   offered_actions: string | null;
   wake_at: string | null;
+  wake_reason: string | null;
+  call_attempts: number;
+  rotation_position: number;
+  contact_id: string | null;
+  call_started_at: string | null;
   call_id: string | null;
   outcome: string | null;
   created_at: string;
   updated_at: string;
 };
+
+type ContactRow = {
+  id: string;
+  name: string;
+  phone: string;
+  created_at: string;
+};
+
+type ServicePolicyRow = {
+  service: string;
+  min_severity: string;
+  quiet_hours: string | null;
+  allowed_actions: string;
+  flap_window_minutes: number;
+  max_calls_per_window: number;
+  escalate_after_minutes: number;
+  updated_at: string;
+};
+
+/** How often the same problem has already rung a phone, and when that window opened. */
+export type CallWindow = { calls: number; openedAt: string | null };
 
 /**
  * The unique index on open fingerprints rejecting a second open incident. That is a race being
@@ -92,8 +143,8 @@ export class Repo {
   async createIncident(incident: Incident): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO incidents (id, state, service, title, severity, detail, fingerprint, source, started_at, links, offered_actions, wake_at, call_id, outcome, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)`,
+        `INSERT INTO incidents (id, state, service, title, severity, detail, fingerprint, source, started_at, links, offered_actions, wake_at, wake_reason, call_attempts, rotation_position, contact_id, call_started_at, call_id, outcome, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)`,
       )
       .bind(
         incident.id,
@@ -110,6 +161,11 @@ export class Repo {
           ? null
           : JSON.stringify(incident.offeredActions),
         incident.wakeAt,
+        incident.wakeReason,
+        incident.callAttempts,
+        incident.rotationPosition,
+        incident.contactId,
+        incident.callStartedAt,
         incident.callId,
         incident.outcome,
         incident.createdAt,
@@ -151,29 +207,52 @@ export class Repo {
   }
 
   /**
-   * Incidents that have sat in one open state longer than that state is allowed to last, oldest
-   * first. Every open state is covered, not just the one waiting on a call: an incident that stops
-   * anywhere counts as open, and an open incident answers every later repeat of its alert as a
-   * duplicate, so any uncovered state is a way to silence a service for good.
+   * Incidents the sweep should look at, oldest first. Every open state is covered, not just the one
+   * waiting on a call: an incident that stops anywhere counts as open, and an open incident answers
+   * every later repeat of its alert as a duplicate, so any uncovered state is a way to silence a
+   * service for good.
    *
-   * A snooze is timed by its own deadline rather than by how long ago it was written, because the
-   * responder chose that deadline out loud.
+   * Two clocks, because there are two ways to stop. An active state is late when nothing has
+   * touched it for a while. A parked state is late only once its own deadline has passed by more
+   * than the grace period, which is what keeps the sweep out of the way of the alarm that is
+   * supposed to handle it. A parked state with no deadline at all has nothing to be late against,
+   * so the third clause catches it on the active clock rather than leaving it there for ever.
    */
   async findStalledIncidents(
-    thresholds: { active: string; escalating: string; now: string },
+    thresholds: { active: string; wake: string },
     limit: number,
   ): Promise<Incident[]> {
     const { results } = await this.db
       .prepare(
         `SELECT * FROM incidents
-         WHERE (state IN ('received', 'calling', 'deciding', 'acting') AND updated_at < ?1)
-            OR (state = 'escalating' AND updated_at < ?2)
-            OR (state = 'snoozed' AND wake_at IS NOT NULL AND wake_at <= ?3)
-         ORDER BY updated_at ASC LIMIT ?4`,
+         WHERE (state IN (${ACTIVE_STATES}) AND updated_at < ?1)
+            OR (state IN (${SCHEDULED_STATES}) AND wake_at IS NOT NULL AND wake_at < ?2)
+            OR (state IN (${SCHEDULED_STATES}) AND wake_at IS NULL AND updated_at < ?1)
+         ORDER BY updated_at ASC LIMIT ?3`,
       )
-      .bind(thresholds.active, thresholds.escalating, thresholds.now, limit)
+      .bind(thresholds.active, thresholds.wake, limit)
       .all<IncidentRow>();
     return results.map(toIncident);
+  }
+
+  /**
+   * How often this exact problem has already rung a phone inside the flap window, and when the
+   * earliest of those calls was, which is the moment the window rolls forward. The incident being
+   * routed is excluded by id: it is asking whether it may call, so it must not count itself.
+   */
+  async callsInWindow(
+    fingerprint: string,
+    since: string,
+    excludingIncidentId: string,
+  ): Promise<CallWindow> {
+    const row = await this.db
+      .prepare(
+        `SELECT COUNT(*) AS calls, MIN(created_at) AS opened_at FROM incidents
+         WHERE fingerprint = ?1 AND call_id IS NOT NULL AND created_at >= ?2 AND id <> ?3`,
+      )
+      .bind(fingerprint, since, excludingIncidentId)
+      .first<{ calls: number; opened_at: string | null }>();
+    return { calls: row?.calls ?? 0, openedAt: row?.opened_at ?? null };
   }
 
   /**
@@ -191,13 +270,22 @@ export class Repo {
       callId: "call_id",
       outcome: "outcome",
       wakeAt: "wake_at",
+      wakeReason: "wake_reason",
       offeredActions: "offered_actions",
+      callAttempts: "call_attempts",
+      rotationPosition: "rotation_position",
+      contactId: "contact_id",
+      callStartedAt: "call_started_at",
     };
 
     const assignments: string[] = [];
-    const values: (string | null)[] = [];
+    const values: (string | number | null)[] = [];
     for (const key of Object.keys(columns) as (keyof IncidentPatch)[]) {
-      if (!(key in patch)) continue;
+      // Present-but-undefined is skipped rather than written as null. Omitting a field and clearing
+      // it stay different requests, but the difference is carried by an explicit null: two of these
+      // columns are NOT NULL, and a spread that happens to carry an undefined would otherwise turn
+      // a routine update into a constraint failure halfway through an incident.
+      if (!(key in patch) || patch[key] === undefined) continue;
       assignments.push(`${columns[key]} = ?`);
       values.push(encodePatchValue(patch[key]));
     }
@@ -400,6 +488,133 @@ export class Repo {
       .first<{ n: number }>();
     return row?.n ?? 0;
   }
+
+  async getServicePolicy(service: string): Promise<ServicePolicy | null> {
+    const row = await this.db
+      .prepare(`SELECT * FROM service_policy WHERE service = ?1`)
+      .bind(service)
+      .first<ServicePolicyRow>();
+    return row === null ? null : toServicePolicy(row);
+  }
+
+  async listServicePolicies(): Promise<ServicePolicy[]> {
+    const { results } = await this.db
+      .prepare(`SELECT * FROM service_policy ORDER BY service ASC`)
+      .all<ServicePolicyRow>();
+    return results.map(toServicePolicy);
+  }
+
+  async upsertServicePolicy(policy: ServicePolicy): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO service_policy (service, min_severity, quiet_hours, allowed_actions, flap_window_minutes, max_calls_per_window, escalate_after_minutes, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT (service) DO UPDATE SET
+           min_severity = excluded.min_severity,
+           quiet_hours = excluded.quiet_hours,
+           allowed_actions = excluded.allowed_actions,
+           flap_window_minutes = excluded.flap_window_minutes,
+           max_calls_per_window = excluded.max_calls_per_window,
+           escalate_after_minutes = excluded.escalate_after_minutes,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        policy.service,
+        policy.minSeverity,
+        policy.quietHours === null ? null : JSON.stringify(policy.quietHours),
+        JSON.stringify(policy.allowedActions),
+        policy.flapWindowMinutes,
+        policy.maxCallsPerWindow,
+        policy.escalateAfterMinutes,
+        policy.updatedAt,
+      )
+      .run();
+  }
+
+  async listContacts(): Promise<Contact[]> {
+    const { results } = await this.db
+      .prepare(`SELECT * FROM contacts ORDER BY created_at ASC`)
+      .all<ContactRow>();
+    return results.map(toContact);
+  }
+
+  async getContact(id: string): Promise<Contact | null> {
+    const row = await this.db
+      .prepare(`SELECT * FROM contacts WHERE id = ?1`)
+      .bind(id)
+      .first<ContactRow>();
+    return row === null ? null : toContact(row);
+  }
+
+  async createContact(contact: Contact): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO contacts (id, name, phone, created_at) VALUES (?1, ?2, ?3, ?4)`,
+      )
+      .bind(contact.id, contact.name, contact.phone, contact.createdAt)
+      .run();
+  }
+
+  async deleteContact(id: string): Promise<void> {
+    await this.db.prepare(`DELETE FROM contacts WHERE id = ?1`).bind(id).run();
+  }
+
+  /** Which services still name this contact, so deleting one cannot quietly shorten a rota. */
+  async rotationsNaming(contactId: string): Promise<string[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT DISTINCT service FROM rotation WHERE contact_id = ?1 ORDER BY service ASC`,
+      )
+      .bind(contactId)
+      .all<{ service: string }>();
+    return results.map((row) => row.service);
+  }
+
+  /**
+   * The people a service calls, in order. A service with a rota of its own uses it; everything else
+   * falls back to the shared one, so adding a service does not mean rebuilding the rota.
+   */
+  async rotationFor(service: string): Promise<Contact[]> {
+    const own = await this.rotationRows(service);
+    if (own.length > 0) return own;
+    return service === SHARED_ROTATION
+      ? []
+      : this.rotationRows(SHARED_ROTATION);
+  }
+
+  /** Whether this service has a rota of its own, as opposed to inheriting the shared one. */
+  async hasOwnRotation(service: string): Promise<boolean> {
+    const row = await this.db
+      .prepare(`SELECT 1 AS present FROM rotation WHERE service = ?1 LIMIT 1`)
+      .bind(service)
+      .first<{ present: number }>();
+    return row !== null;
+  }
+
+  async setRotation(service: string, contactIds: string[]): Promise<void> {
+    await this.db.batch([
+      this.db.prepare(`DELETE FROM rotation WHERE service = ?1`).bind(service),
+      ...contactIds.map((contactId, position) =>
+        this.db
+          .prepare(
+            `INSERT INTO rotation (service, position, contact_id) VALUES (?1, ?2, ?3)`,
+          )
+          .bind(service, position, contactId),
+      ),
+    ]);
+  }
+
+  private async rotationRows(service: string): Promise<Contact[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT c.id, c.name, c.phone, c.created_at FROM rotation r
+         JOIN contacts c ON c.id = r.contact_id
+         WHERE r.service = ?1 ORDER BY r.position ASC`,
+      )
+      .bind(service)
+      .all<ContactRow>();
+    return results.map(toContact);
+  }
 }
 
 function toIncident(row: IncidentRow): Incident {
@@ -419,9 +634,48 @@ function toIncident(row: IncidentRow): Incident {
         ? []
         : (JSON.parse(row.offered_actions) as string[]),
     wakeAt: row.wake_at,
+    wakeReason: isWakeReason(row.wake_reason) ? row.wake_reason : null,
+    callAttempts: row.call_attempts,
+    rotationPosition: row.rotation_position,
+    contactId: row.contact_id,
+    callStartedAt: row.call_started_at,
     callId: row.call_id,
     outcome: row.outcome,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function toContact(row: ContactRow): Contact {
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * A stored policy is written only through the validated configuration endpoint, but the value that
+ * decides whether a phone rings at three in the morning is checked again on the way out anyway. A
+ * quiet-hours block that no longer parses is dropped rather than obeyed, which fails towards
+ * ringing: the alternative is a row nobody can read silencing a service nobody is watching.
+ */
+function toServicePolicy(row: ServicePolicyRow): ServicePolicy {
+  return {
+    service: row.service,
+    minSeverity: row.min_severity as Severity,
+    quietHours: parseQuietHours(row.quiet_hours),
+    allowedActions: JSON.parse(row.allowed_actions) as string[],
+    flapWindowMinutes: row.flap_window_minutes,
+    maxCallsPerWindow: row.max_calls_per_window,
+    escalateAfterMinutes: row.escalate_after_minutes,
+    updatedAt: row.updated_at,
+  };
+}
+
+function parseQuietHours(stored: string | null): QuietHours | null {
+  if (stored === null) return null;
+  const parsed = quietHoursInput.safeParse(JSON.parse(stored));
+  return parsed.success ? parsed.data : null;
 }
