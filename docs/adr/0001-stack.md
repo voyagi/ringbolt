@@ -65,15 +65,28 @@ else opens the gate so new events interleave. Their guidance is explicit that on
 other events can interleave, and that `blockConcurrencyWhile()` is the tool for a critical section
 that awaits an external call.
 
-Ringbolt's object awaits D1 and the call provider, never `ctx.storage`, so today it gets no
-automatic serialization at all. The single-owner property is still available and is still the
-reason to be here, but it has to be taken deliberately: hold the read-then-write critical sections
-inside `blockConcurrencyWhile()`, or move live incident state into the object's own SQLite storage
-so the gate applies, or add a uniqueness constraint in D1 as a backstop. Until one of those is
-done, two terminal deliveries for the same incident can both pass the state check and run an
-action twice, which on this product means a production change applied twice.
+Ringbolt's object awaits D1 and the call provider, never `ctx.storage`, so it got no automatic
+serialization at all. The single-owner property is still available and is still the reason to be
+here, but it has to be taken deliberately.
 
-This is tracked as the first correctness item of phase 2 and is not fixed as of this writing.
+**Taken, 2026-08-21.** The object supplies the orchestrator with an `exclusive` function backed by
+`ctx.blockConcurrencyWhile()`, and the read-then-write sections run inside it: the check for an
+already-open incident before creating one, and the move out of `calling` before an action is
+authorized. Only database work is held there. Placing the call and running the action are outside
+it, because a blocked section is capped at thirty seconds and a telephone call is not a thing to
+hold a lock across. The callback catches its own failures and returns them as a value, because a
+throw out of `blockConcurrencyWhile()` terminates and resets the object.
+
+A second layer sits underneath, in case anything ever reaches the database without an owner: a
+unique index on `fingerprint` filtered to the open states, so a second open incident for one
+fingerprint fails loudly instead of becoming a second phone call. The collision is answered as the
+duplicate it is.
+
+The window is reproduced in `test/concurrency.test.ts` rather than argued about. Two concurrent
+terminal deliveries with no section held do run the action twice, and the same pair with the
+section held run it once. The local workers pool delivers messages to one Durable Object in series
+of its own accord, so the equivalent test through the object is a regression guard rather than a
+reproduction, and the measurement is taken at the seam where the section is applied.
 
 Verified on Cloudflare's own documentation on 2026-08-21, because the free tier is load-bearing
 here: Durable Objects are available on the Workers free plan with the SQLite storage backend, and
@@ -97,9 +110,11 @@ network call is not CPU time.
 
 Accepted costs, stated rather than discovered later:
 
-- Two storage systems. D1 is the queryable record and a Durable Object holds live lifecycle state.
-  The rule that keeps this honest is that D1 is the source of truth for anything a human reads
-  after the fact, and the Durable Object is the source of truth only while an incident is live.
+- One storage system today, not two. D1 holds every record, and the Durable Object holds no state
+  of its own: what it provides is a single owner per incident and the section that makes a
+  read-then-write safe. The consequence originally written here, that the object would be the
+  source of truth while an incident is live, is not what was built, and saying so was what let the
+  serialization claim above go unexamined for as long as it did.
 - No server-side rendering, so the dashboard is a client-rendered application. Acceptable because
   every page sits behind authentication and none of it should be indexed.
 - Local development runs on workerd through Wrangler rather than plain Node, so anything assuming a

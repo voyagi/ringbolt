@@ -26,7 +26,7 @@ Two values are plain configuration and live in `wrangler.jsonc` under `vars`:
 | ----------------- | -------------------------------------------------------------------------------------------- |
 | `RINGBOLT_ENV`    | `development`, `preview`, or `production`. Outside development, an intake token is required. |
 | `PUBLIC_BASE_URL` | The deployed URL. CALL-E sends its webhooks here, so it has to be the real one.              |
-| `CALLE_MODE`      | `fake` dials nothing and is the default. `live` places real phone calls.                     |
+| `CALLE_MODE`      | `fake` dials nothing and is the only value this build accepts. See below.                    |
 
 Two are secrets and are set with `wrangler secret put`, never written to a file in this
 repository:
@@ -35,6 +35,9 @@ repository:
 wrangler secret put CALLE_API_KEY   # from https://dashboard.heycall-e.com/account/api-keys
 wrangler secret put INTAKE_TOKEN    # any long random string, used in the intake URL
 ```
+
+A cron trigger runs once a minute and is declared in `wrangler.jsonc`, so `wrangler deploy` sets it
+up. It re-reads any call that has not reported back and clears out expired webhook event ids.
 
 `INTAKE_TOKEN` is what stops a stranger opening incidents and making your phone ring, so treat it
 as a credential and rotate it if it leaks.
@@ -59,12 +62,18 @@ curl -X POST https://your-worker-url/intake/$INTAKE_TOKEN \
 `service` and `title` are required. `severity` is one of `critical`, `high`, or `low` and defaults
 to `high`. `detail`, `source`, `fingerprint`, `startedAt`, and `links` are optional.
 
-Send `fingerprint` if your monitor has a stable identifier for the underlying problem. Without one
-Ringbolt groups by service and title, which is coarser: two genuinely different problems that
-share a title will be treated as one incident, and only the first will ring a phone.
+`startedAt` is an ISO timestamp and it is worth sending: it is read out on the call as a duration,
+which is the first thing a responder asks. `links` are stored with the incident.
 
-## Going live with real calls
+Send `fingerprint` if your monitor has a stable identifier for the underlying problem. It groups
+repeats into one incident and it also decides which owner handles them, so a stable value gives one
+phone call for one broken thing however the title varies between alerts. Without one, Ringbolt
+groups by service and title, which is coarser: two genuinely different problems that share a title
+are treated as one incident, and only the first rings a phone.
 
-Set `CALLE_MODE=live` only once `CALLE_API_KEY` is set and `PUBLIC_BASE_URL` is reachable from the
-internet. In live mode every incident that clears the policy places a real phone call to a real
-person, and the account's call allowance is finite. `/api/budget` reports what has been spent.
+## Real calls
+
+This build cannot place one. `CALLE_MODE=live` is refused when the configuration is read, so
+`/health` answers `ok: false` and says why, rather than accepting the setting and then failing every
+intake. The CALL-E adapter is the next piece of work; when it lands, this section gets the go-live
+procedure and `/api/budget` reports what the finite call allowance has been spent on.
