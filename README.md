@@ -91,18 +91,30 @@ curl http://localhost:8787/api/incidents
 curl http://localhost:8787/api/services/checkout/state
 ```
 
-Real calls are not switchable on yet. `CALLE_MODE=live` is refused at startup, and `/health`
-reports it, because the CALL-E adapter is the next piece of work rather than a missing key. Until
-it lands, the stand-in is the whole telephone.
+To place real calls, set `CALLE_MODE=live` with a `CALLE_API_KEY` and a `DEMO_PHONE` in E.164.
+Configuration is refused if either is missing, so `/health` tells you before an alert does.
+`docs/deploying.md` has the full procedure.
+
+The CALL-E free tier is twenty calls in total and there is no twenty first, so the allowance is
+enforced rather than documented. `/api/budget` reports what is left, the adapter refuses to place a
+call once the count is reached and sends nothing when it refuses, and reading calls back keeps
+working so incidents already in flight still finish.
 
 ## The local stand-in
 
-Development runs against a fake CALL-E rather than the real one, and the fake is deliberately
-awkward: the call is asynchronous, the outcome arrives as a webhook carrying almost nothing, and
-the real state has to be fetched back. Anything that passes against it and then fails against the
-real API is a gap in the fake, not a surprise from the vendor. It stores its calls in the database
-rather than in memory, because the code placing a call and the code receiving the webhook run in
-different isolates, and an in-memory fake would quietly pass a test the real integration fails.
+Development runs against a fake CALL-E rather than the real one, because every real call spends
+part of an allowance that cannot be topped up. The fake is deliberately awkward: the call is
+asynchronous, the outcome arrives as a webhook carrying almost nothing, and the real state has to
+be fetched back. Anything that passes against it and then fails against the real API is a gap in
+the fake, not a surprise from the vendor. It stores its calls in the database rather than in
+memory, because the code placing a call and the code receiving the webhook run in different
+isolates, and an in-memory fake would quietly pass a test the real integration fails.
+
+That argument is only worth anything if the two are actually interchangeable, so both are held to
+one suite. `test/placer-contract.test.ts` is written against the interface rather than against
+either implementation, and each of them is run through every case in it. The CALL-E adapter is
+exercised there with its transport replaced, so the real adapter, the real SDK, and the real
+request building all run, and only the network is missing.
 
 ## Verifying it
 
@@ -121,7 +133,7 @@ red, and the clean tree passes all four.
 | Path          | What is in it                                                                              |
 | ------------- | ------------------------------------------------------------------------------------------ |
 | `src/domain`  | The incident state machine, the decision contract, and the orchestrator. No platform code. |
-| `src/calle`   | The telephone port, the local stand-in, and the verification step.                         |
+| `src/calle`   | The telephone port, the CALL-E adapter, the local stand-in, and the verification step.     |
 | `src/actions` | Runbook actions and their guardrails.                                                      |
 | `src/db`      | The D1 schema access layer.                                                                |
 | `src/worker`  | Routing, configuration, and the incident Durable Object.                                   |
@@ -131,13 +143,13 @@ red, and the clean tree passes all four.
 
 Early. The loop runs end to end against the local stand-in: an alert becomes an incident, a call is
 placed, the decision that comes back is verified and authorized, and the authorized action changes
-state that can be read back.
+state that can be read back. The CALL-E adapter is built and switchable on, and it satisfies the
+same contract suite as the stand-in.
 
 Not built yet, and not pretended to be:
 
-- The CALL-E adapter. `CALLE_MODE=live` is refused rather than accepted and then failed.
 - Routing policy. Every alert places a call, and every service is offered the same two actions.
-- Contacts and rotation. There is one responder and no number configured, so nothing is dialled.
+- Contacts and rotation. There is one number, so a call nobody answers goes to no one else.
 - The dashboard. The API is there; the screens are not.
 
 ## Licence

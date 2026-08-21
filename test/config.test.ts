@@ -11,20 +11,54 @@ const base = {
   INTAKE_TOKEN: "a-long-enough-intake-token",
 };
 
+const live = {
+  ...base,
+  CALLE_MODE: "live",
+  CALLE_API_KEY: "test-key-configuration",
+  DEMO_PHONE: "+31612345678",
+};
+
 describe("reading the configuration", () => {
   it("accepts the stand-in", () => {
     expect(readConfig(base).CALLE_MODE).toBe("fake");
   });
 
+  it("accepts live mode once there is a key and a number", () => {
+    expect(readConfig(live).CALLE_MODE).toBe("live");
+  });
+
   /**
-   * Three documents used to tell an operator to switch this on, and the switch was accepted: the
-   * health check reported healthy while every intake and every webhook returned a five hundred at
-   * the moment a phone was supposed to ring. Refusing it here is what makes the health check right.
+   * Three documents used to tell an operator to switch this on before the adapter existed, and the
+   * switch was accepted: the health check reported healthy while every intake and every webhook
+   * returned a five hundred at the moment a phone was supposed to ring. What is refused here is
+   * what makes the health check right, so each half of a working telephone is required by name.
    */
-  it("refuses live mode while there is no adapter to honour it", () => {
-    expect(() =>
-      readConfig({ ...base, CALLE_MODE: "live", CALLE_API_KEY: "sk_real" }),
-    ).toThrow(ConfigurationError);
+  it("refuses live mode with no api key", () => {
+    const { CALLE_API_KEY: _absent, ...withoutKey } = live;
+    expect(() => readConfig(withoutKey)).toThrow(ConfigurationError);
+  });
+
+  it("refuses live mode with no number to dial", () => {
+    const { DEMO_PHONE: _absent, ...withoutPhone } = live;
+    expect(() => readConfig(withoutPhone)).toThrow(ConfigurationError);
+  });
+
+  /** The placeholder the stand-in carries. It must never be able to become a real call. */
+  it("refuses a number that is not a real one", () => {
+    expect(() => readConfig({ ...live, DEMO_PHONE: "+00000000000" })).toThrow(
+      ConfigurationError,
+    );
+  });
+
+  /**
+   * The one switch that takes the whole build off the telephone, whatever any environment says.
+   * The allowance is twenty calls and cannot be topped up, so it is worth being able to stop.
+   */
+  it("refuses live mode when the build has live calling switched off", () => {
+    expect(() => readConfig(live, { liveAvailable: false })).toThrow(
+      ConfigurationError,
+    );
+    expect(readConfig(live, { liveAvailable: true }).CALLE_MODE).toBe("live");
   });
 
   it("names what is wrong rather than failing anonymously", () => {

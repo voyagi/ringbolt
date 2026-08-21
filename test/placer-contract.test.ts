@@ -1,8 +1,10 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { D1FakeCallStore, FakeCallPlacer } from "../src/calle/fake.js";
+import { LiveCallPlacer } from "../src/calle/live.js";
 import type { CallPlacer, PlaceCallInput } from "../src/calle/port.js";
 import { verifyCall } from "../src/calle/verify.js";
+import { calleApiStub } from "./support/calle-api.js";
 
 /**
  * The contract every telephone has to satisfy, written against the interface rather than against
@@ -20,6 +22,18 @@ const implementations: { name: string; build: () => CallPlacer }[] = [
           kind: "answers",
           decision: { decision: "hold" },
         }),
+      }),
+  },
+  {
+    name: "the CALL-E adapter",
+    build: () =>
+      new LiveCallPlacer({
+        apiKey: "test-key-contract-suite",
+        budget: { spent: async () => 0 },
+        // A host that resolves to nothing, so a transport that failed to be installed would fail
+        // loudly rather than reach the real API with the suite's made-up key.
+        baseUrl: "https://calle.invalid",
+        fetchImpl: calleApiStub().fetch,
       }),
   },
 ];
