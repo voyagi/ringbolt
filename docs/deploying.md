@@ -26,12 +26,13 @@ Three values are plain configuration and live in `wrangler.jsonc` under `vars`:
 | ----------------- | -------------------------------------------------------------------------------------------- |
 | `RINGBOLT_ENV`    | `development`, `preview`, or `production`. Outside development, an intake token is required. |
 | `PUBLIC_BASE_URL` | The deployed URL. CALL-E sends its webhooks here, so it has to be the real one.              |
-| `CALLE_MODE`      | `fake` dials nothing and is the only value this build accepts. See below.                    |
+| `CALLE_MODE`      | `fake` dials nothing. `live` places real calls. See below.                                   |
 
-One is a secret and is set with `wrangler secret put`, never written to a file in this repository:
+Two are secrets, set with `wrangler secret put` and never written to a file in this repository:
 
 ```bash
 wrangler secret put INTAKE_TOKEN    # any long random string, used in the intake URL
+wrangler secret put DEMO_PHONE      # the number Ringbolt calls, in E.164, live mode only
 ```
 
 A cron trigger runs once a minute and is declared in `wrangler.jsonc`, so `wrangler deploy` sets it
@@ -71,11 +72,27 @@ are treated as one incident, and only the first rings a phone.
 
 ## Real calls
 
-This build cannot place one. `CALLE_MODE=live` is refused when the configuration is read, so
-`/health` answers `ok: false` and says why, rather than accepting the setting and then failing every
-intake. The CALL-E adapter is the next piece of work; when it lands, this section gets the go-live
-procedure and `/api/budget` reports what the finite call allowance has been spent on.
+Live mode reaches an actual telephone, and the CALL-E free tier is twenty calls in total with no
+way to buy a twenty first. Read `/api/budget` before switching it on: it reports how many have been
+placed and how many are left, counted from the ledger row written when a call is accepted.
 
-There is therefore no point setting `CALLE_API_KEY` yet. Nothing reads it until live mode exists,
-so `wrangler secret put CALLE_API_KEY` belongs to that same piece of work rather than to this
-setup.
+```bash
+wrangler secret put CALLE_API_KEY   # from https://dashboard.heycall-e.com/account/api-keys
+wrangler secret put DEMO_PHONE      # E.164, for example +31612345678
+```
+
+Then set `CALLE_MODE` to `live` in `wrangler.jsonc` and deploy. Four things have to be true before a
+call can happen, and each is refused separately rather than failing at the moment a phone should
+ring:
+
+1. `PUBLIC_BASE_URL` is the deployed URL, because that is where CALL-E delivers the outcome. A
+   webhook that cannot be delivered leaves the sweep to recover the call a few minutes later.
+2. `CALLE_API_KEY` is set. Configuration is refused without it, and `/health` says so.
+3. `DEMO_PHONE` is set and is a valid E.164 number. Ringbolt dials this number and no other until
+   the rotation lands.
+4. `LIVE_MODE_AVAILABLE` in `src/worker/env.ts` is `true`. Set it to `false` to take the whole
+   build off the telephone regardless of what any environment says, which is worth doing when
+   something is looping and the remaining allowance matters more than the alerts.
+
+Once the allowance is spent, placing a call is refused with the count in the message and nothing is
+sent to CALL-E. Reading calls back keeps working, so incidents already in flight still finish.

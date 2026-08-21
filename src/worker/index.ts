@@ -4,7 +4,7 @@ import {
   eventIdFromDelivery,
   verifyCall,
 } from "../calle/verify.js";
-import { isTerminalCall } from "../calle/port.js";
+import { REAL_CALL_ALLOWANCE, isTerminalCall } from "../calle/port.js";
 import { Repo } from "../db/repo.js";
 import {
   type Incident,
@@ -178,8 +178,8 @@ app.get("/api/budget", async (c) => {
   const spent = await repo.countRealCalls();
   return c.json({
     realCallsPlaced: spent,
-    freeTierTotal: 20,
-    remaining: Math.max(0, 20 - spent),
+    freeTierTotal: REAL_CALL_ALLOWANCE,
+    remaining: Math.max(0, REAL_CALL_ALLOWANCE - spent),
   });
 });
 

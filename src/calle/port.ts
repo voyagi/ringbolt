@@ -62,3 +62,15 @@ export interface CallPlacer {
 
 /** Deferred work, injected so the fake can be driven synchronously in tests. */
 export type Scheduler = (delayMs: number, run: () => Promise<void>) => void;
+
+/**
+ * The CALL-E free tier is twenty calls in total and there is no way to buy a twenty first. The
+ * number lives here rather than beside the endpoint that reports it, so the ceiling the live
+ * adapter refuses at and the figure the product shows can never drift apart.
+ */
+export const REAL_CALL_ALLOWANCE = 20;
+
+/** How many real calls have already been spent. Read immediately before a live call is placed. */
+export type CallBudget = {
+  spent(): Promise<number>;
+};

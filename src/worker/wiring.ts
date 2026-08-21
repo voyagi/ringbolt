@@ -3,19 +3,16 @@ import {
   FakeCallPlacer,
   type FakeScenario,
 } from "../calle/fake.js";
+import { LiveCallPlacer } from "../calle/live.js";
 import type { CallPlacer, PlaceCallInput, Scheduler } from "../calle/port.js";
 import { Repo } from "../db/repo.js";
 import type { Exclusive } from "../domain/orchestrator.js";
 import { Orchestrator } from "../domain/orchestrator.js";
-import {
-  type Bindings,
-  LIVE_MODE_AVAILABLE,
-  type RingboltConfig,
-} from "./env.js";
+import type { Bindings, RingboltConfig } from "./env.js";
 
 /**
- * Until phase 3 there is one responder, and until the owner supplies a number there is not even
- * one. The fake never dials, so this placeholder is only ever reached by the fake.
+ * Until phase 3 there is one responder, and in fake mode there is no number at all. It fails the
+ * E.164 check that live mode's number has to pass, so it cannot become a real call.
  */
 const UNCONFIGURED_RESPONDER = "+00000000000";
 
@@ -56,9 +53,17 @@ export type PlacerOptions = {
   scheduler: Scheduler;
   now?: () => Date;
   scenarioFor?: (input: PlaceCallInput) => FakeScenario;
+  /**
+   * The transport the CALL-E adapter sends through. Left out in the product, where the platform's
+   * own fetch is the right answer. Supplying one is how the whole incident loop is run against the
+   * real adapter without a telephone ringing, which is the only way that path gets exercised more
+   * than the handful of times the call allowance can pay for.
+   */
+  calleFetch?: (input: Request) => Promise<Response>;
 };
 
 export type OrchestratorOptions = PlacerOptions & {
+  /** Fake mode only. Live mode dials the configured number and nothing else. */
   responderPhone?: string;
   /**
    * Required rather than defaulted, because a default would be an unserialised one and the caller
@@ -74,23 +79,37 @@ export function buildPlacer(
 ): CallPlacer {
   const now = options.now ?? (() => new Date());
 
-  if (config.CALLE_MODE === "fake") {
-    return new FakeCallPlacer({
-      store: new D1FakeCallStore(env.DB, now),
-      scheduler: options.scheduler,
-      scenarioFor:
-        options.scenarioFor ?? defaultScenario(config.CALLE_FAKE_DELAY_MS),
-      now,
+  if (config.CALLE_MODE === "live") {
+    return new LiveCallPlacer({
+      apiKey: config.CALLE_API_KEY,
+      // The ledger is what the product reports at /api/budget, so the ceiling and the published
+      // figure are the same count rather than two that can disagree.
+      budget: { spent: () => new Repo(env.DB).countRealCalls() },
+      ...(options.calleFetch === undefined
+        ? {}
+        : { fetchImpl: options.calleFetch }),
     });
   }
 
-  // readConfig refuses live mode while LIVE_MODE_AVAILABLE is false, so reaching this line means
-  // the two have drifted apart. Fail closed rather than dial something that does not exist.
-  throw new Error(
-    LIVE_MODE_AVAILABLE
-      ? "the live CALL-E placer is not wired up"
-      : "live mode was accepted by the configuration but no CALL-E adapter is built",
-  );
+  return new FakeCallPlacer({
+    store: new D1FakeCallStore(env.DB, now),
+    scheduler: options.scheduler,
+    scenarioFor:
+      options.scenarioFor ?? defaultScenario(config.CALLE_FAKE_DELAY_MS),
+    now,
+  });
+}
+
+/**
+ * The stand-in never carries the real number. It cannot dial, so a number in its records would be
+ * personal data kept for nothing, and a mode that got mixed up could not turn a test into a call.
+ */
+function responderFor(
+  config: RingboltConfig,
+  override: string | undefined,
+): string {
+  if (config.CALLE_MODE === "live") return config.DEMO_PHONE;
+  return override ?? UNCONFIGURED_RESPONDER;
 }
 
 export function buildOrchestrator(
@@ -103,7 +122,7 @@ export function buildOrchestrator(
     repo: new Repo(env.DB),
     placer: buildPlacer(env, config, options),
     publicBaseUrl: config.PUBLIC_BASE_URL,
-    responderPhone: options.responderPhone ?? UNCONFIGURED_RESPONDER,
+    responderPhone: responderFor(config, options.responderPhone),
     now,
     newId,
     exclusive: options.exclusive,
