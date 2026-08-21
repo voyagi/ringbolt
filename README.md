@@ -26,16 +26,21 @@ alert  ->  policy  ->  phone call  ->  spoken decision  ->  authorization  ->  a
 ```
 
 1. Any monitor posts an alert to an intake endpoint. The payload is plain JSON, so a curl works.
-2. Ringbolt decides whether this is worth a phone call, who is on call, and which remediation
-   actions may be offered for that service.
-3. It places a real call through CALL-E, carrying the incident facts and a result schema that
-   forces a structured decision back rather than a paragraph of prose.
+2. Repeats of the same problem collapse into one incident, and the remediation actions that may be
+   offered for that service are read out on the call.
+3. It places a call through CALL-E, carrying the incident facts and a result schema that forces a
+   structured decision back rather than a paragraph of prose.
 4. The responder asks whatever they need to, then says what to do.
 5. The decision is verified before anything happens. Only then does the action run.
 6. Incident, transcript, decision, authorizer, action, and the system state before and after all
    land in one record.
 
-If nobody answers, it moves to the next person in the rotation.
+A webhook that never arrives does not lose the decision. A sweep re-reads any call that has not
+reported back, so the incident finishes either way.
+
+Two steps of that list are still ahead of the code, and the Status section below says where they
+are: the routing policy that decides whether an alert is worth a call at all, and the rotation that
+moves to the next person when nobody answers.
 
 ## Two properties this is built around
 
@@ -84,7 +89,9 @@ curl http://localhost:8787/api/incidents
 curl http://localhost:8787/api/services/checkout/state
 ```
 
-To place real calls, set `CALLE_MODE=live` and supply `CALLE_API_KEY`. See `.env.example`.
+Real calls are not switchable on yet. `CALLE_MODE=live` is refused at startup, and `/health`
+reports it, because the CALL-E adapter is the next piece of work rather than a missing key. Until
+it lands, the stand-in is the whole telephone.
 
 ## The local stand-in
 
@@ -112,7 +119,7 @@ red, and the clean tree passes all four.
 | Path          | What is in it                                                                              |
 | ------------- | ------------------------------------------------------------------------------------------ |
 | `src/domain`  | The incident state machine, the decision contract, and the orchestrator. No platform code. |
-| `src/calle`   | The telephone port, the live adapter, the local stand-in, and the verification step.       |
+| `src/calle`   | The telephone port, the local stand-in, and the verification step.                         |
 | `src/actions` | Runbook actions and their guardrails.                                                      |
 | `src/db`      | The D1 schema access layer.                                                                |
 | `src/worker`  | Routing, configuration, and the incident Durable Object.                                   |
@@ -120,9 +127,16 @@ red, and the clean tree passes all four.
 
 ## Status
 
-Early. The loop runs end to end against the local stand-in. The real CALL-E adapter, the rotation
-and escalation policy, the runbook engine's outbound actions, and the dashboard are the next
-pieces.
+Early. The loop runs end to end against the local stand-in: an alert becomes an incident, a call is
+placed, the decision that comes back is verified and authorized, and the authorized action changes
+state that can be read back.
+
+Not built yet, and not pretended to be:
+
+- The CALL-E adapter. `CALLE_MODE=live` is refused rather than accepted and then failed.
+- Routing policy. Every alert places a call, and every service is offered the same two actions.
+- Contacts and rotation. There is one responder and no number configured, so nothing is dialled.
+- The dashboard. The API is there; the screens are not.
 
 ## Licence
 
