@@ -4,8 +4,13 @@ import {
   eventIdFromDelivery,
   verifyCall,
 } from "../calle/verify.js";
+import { isTerminalCall } from "../calle/port.js";
 import { Repo } from "../db/repo.js";
-import { alertPayload, fingerprintFor } from "../domain/incident.js";
+import {
+  type Incident,
+  alertPayload,
+  fingerprintFor,
+} from "../domain/incident.js";
 import { incidentIdOf } from "../domain/orchestrator.js";
 import { ConfigurationError, type Bindings, readConfig } from "./env.js";
 import { incidentStub } from "./incident-client.js";
@@ -104,6 +109,12 @@ app.post("/webhooks/calle", async (c) => {
   });
   const snapshot = await verifyCall(placer, callId);
 
+  // A call that is still running carries no decision, and the caller who named it is anonymous.
+  // Answering one as though it were terminal would spend the incident's only move out of `calling`
+  // and throw away the decision the responder is at that moment giving. Nothing is claimed for it.
+  if (!isTerminalCall(snapshot.status))
+    return c.json({ ok: true, ignored: "the call is still running" });
+
   const incidentId = incidentIdOf(snapshot);
   if (incidentId === null)
     return c.json({ ok: true, ignored: "call has no incident" });
@@ -114,8 +125,10 @@ app.post("/webhooks/calle", async (c) => {
     return c.json({ ok: true, ignored: "unknown incident" });
 
   const startedAt = new Date();
+  const claimId = crypto.randomUUID();
   const claimed = await repo.claimEvent(
     eventId,
+    claimId,
     startedAt.toISOString(),
     new Date(startedAt.getTime() - CLAIM_STALE_AFTER_MS).toISOString(),
   );
@@ -128,24 +141,28 @@ app.post("/webhooks/calle", async (c) => {
     // The claim is the thing that makes a retry a no-op, so a delivery that did not finish its
     // work has to give it back. The provider retrying is the only recovery this design has, and
     // holding the id while answering a non-200 disarms it.
-    await repo.releaseEvent(eventId);
+    await repo.releaseEvent(eventId, claimId);
     throw error;
   }
 
-  await repo.completeEvent(eventId, new Date().toISOString());
+  await repo.completeEvent(eventId, claimId, new Date().toISOString());
   return c.json({ ok: true });
 });
 
 app.get("/api/incidents", async (c) => {
   const repo = new Repo(c.env.DB);
-  return c.json({ incidents: await repo.listIncidents() });
+  const incidents = await repo.listIncidents();
+  return c.json({ incidents: incidents.map(forPublicList) });
 });
 
 app.get("/api/incidents/:id", async (c) => {
   const repo = new Repo(c.env.DB);
   const incident = await repo.getIncident(c.req.param("id"));
   if (incident === null) return c.json({ error: "no such incident" }, 404);
-  return c.json({ incident, events: await repo.listEvents(incident.id) });
+  return c.json({
+    incident: withoutCallId(incident),
+    events: await repo.listEvents(incident.id),
+  });
 });
 
 app.get("/api/services/:service/state", async (c) => {
@@ -186,6 +203,22 @@ function describeIssue(issue: {
   message: string;
 }): string {
   return `${issue.path.join(".") || "root"}: ${issue.message}`;
+}
+
+/**
+ * The call id never leaves the service. Authentication on the read API is phase 7, and until then
+ * publishing it would hand any caller the one value the unauthenticated webhook route accepts from
+ * an anonymous body. The dashboard does not need it, and the audit trail keeps it either way.
+ */
+function withoutCallId(incident: Incident): Omit<Incident, "callId"> {
+  const { callId: _withheld, ...rest } = incident;
+  return rest;
+}
+
+/** The list view is a board, so it carries what a board shows and nothing else. */
+function forPublicList(incident: Incident) {
+  const { detail: _withheld, ...rest } = withoutCallId(incident);
+  return rest;
 }
 
 /**

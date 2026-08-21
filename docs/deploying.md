@@ -20,7 +20,7 @@ npm run db:migrate:remote
 
 ## Configuration
 
-Two values are plain configuration and live in `wrangler.jsonc` under `vars`:
+Three values are plain configuration and live in `wrangler.jsonc` under `vars`:
 
 | Name              | What it does                                                                                 |
 | ----------------- | -------------------------------------------------------------------------------------------- |
@@ -28,11 +28,9 @@ Two values are plain configuration and live in `wrangler.jsonc` under `vars`:
 | `PUBLIC_BASE_URL` | The deployed URL. CALL-E sends its webhooks here, so it has to be the real one.              |
 | `CALLE_MODE`      | `fake` dials nothing and is the only value this build accepts. See below.                    |
 
-Two are secrets and are set with `wrangler secret put`, never written to a file in this
-repository:
+One is a secret and is set with `wrangler secret put`, never written to a file in this repository:
 
 ```bash
-wrangler secret put CALLE_API_KEY   # from https://dashboard.heycall-e.com/account/api-keys
 wrangler secret put INTAKE_TOKEN    # any long random string, used in the intake URL
 ```
 
@@ -77,3 +75,7 @@ This build cannot place one. `CALLE_MODE=live` is refused when the configuration
 `/health` answers `ok: false` and says why, rather than accepting the setting and then failing every
 intake. The CALL-E adapter is the next piece of work; when it lands, this section gets the go-live
 procedure and `/api/budget` reports what the finite call allowance has been spent on.
+
+There is therefore no point setting `CALLE_API_KEY` yet. Nothing reads it until live mode exists,
+so `wrangler secret put CALLE_API_KEY` belongs to that same piece of work rather than to this
+setup.

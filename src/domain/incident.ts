@@ -37,8 +37,13 @@ export const alertPayload = z.object({
   title: z.string().min(1).max(300),
   severity: z.enum(severities).default("high"),
   detail: z.string().max(4000).optional(),
-  /** Sender-side identity for the same underlying problem, used to collapse repeats into one call. */
-  fingerprint: z.string().max(200).optional(),
+  /**
+   * Sender-side identity for the same underlying problem, used to collapse repeats into one call.
+   * A minimum length because an alert template rendering an empty variable into this field would
+   * otherwise give every service in the estate the same identity, and therefore one incident and
+   * one phone call between them all, with a 202 and no signal that anything was wrong.
+   */
+  fingerprint: z.string().min(1).max(200).optional(),
   startedAt: z.iso.datetime().optional(),
   source: z.string().max(120).optional(),
   links: z
@@ -71,6 +76,10 @@ export type Incident = {
   /** When the monitor says the problem began, which is what the responder asks about first. */
   startedAt: string | null;
   links: IncidentLink[];
+  /** The action ids read out on the call, so the set that authorizes is the set the responder heard. */
+  offeredActions: string[];
+  /** When a snoozed incident is due to be looked at again. Null in every other state. */
+  wakeAt: string | null;
   createdAt: string;
   updatedAt: string;
   callId: string | null;
@@ -129,10 +138,9 @@ export function isTerminal(state: IncidentState): boolean {
  * incident, so an ambiguous join would put two different problems in one owner.
  */
 export function fingerprintFor(alert: AlertPayload): string {
-  return (
-    alert.fingerprint ??
-    `service+title:${JSON.stringify([alert.service, alert.title])}`
-  );
+  const supplied = alert.fingerprint?.trim();
+  if (supplied !== undefined && supplied !== "") return supplied;
+  return `service+title:${JSON.stringify([alert.service, alert.title])}`;
 }
 
 export function describeForSpeech(

@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import type { VerifiedCall } from "../calle/verify.js";
 import type { AlertPayload } from "../domain/incident.js";
-import type { OpenResult } from "../domain/orchestrator.js";
+import type { OpenResult, StallReason } from "../domain/orchestrator.js";
 import { type Bindings, readConfig } from "./env.js";
 import type { IncidentActor } from "./incident-client.js";
 import { buildOrchestrator, waitUntilScheduler } from "./wiring.js";
@@ -32,6 +32,10 @@ export class IncidentDurableObject
 
   async abandonCall(incidentId: string, detail: string): Promise<void> {
     await this.orchestrator().abandonCall(incidentId, detail);
+  }
+
+  async closeStalled(incidentId: string, reason: StallReason): Promise<void> {
+    await this.orchestrator().closeStalled(incidentId, reason);
   }
 
   private orchestrator() {

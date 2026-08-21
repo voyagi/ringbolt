@@ -8,6 +8,17 @@ import { openIncidentStates } from "../domain/incident.js";
 
 const OPEN_STATES = openIncidentStates.map((state) => `'${state}'`).join(", ");
 
+export type IncidentPatch = Partial<
+  Pick<Incident, "state" | "callId" | "outcome" | "wakeAt" | "offeredActions">
+>;
+
+function encodePatchValue(
+  value: IncidentPatch[keyof IncidentPatch],
+): string | null {
+  if (value === undefined || value === null) return null;
+  return Array.isArray(value) ? JSON.stringify(value) : value;
+}
+
 export type IncidentEvent = {
   id: string;
   incidentId: string;
@@ -48,6 +59,8 @@ type IncidentRow = {
   source: string | null;
   started_at: string | null;
   links: string | null;
+  offered_actions: string | null;
+  wake_at: string | null;
   call_id: string | null;
   outcome: string | null;
   created_at: string;
@@ -79,8 +92,8 @@ export class Repo {
   async createIncident(incident: Incident): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO incidents (id, state, service, title, severity, detail, fingerprint, source, started_at, links, call_id, outcome, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`,
+        `INSERT INTO incidents (id, state, service, title, severity, detail, fingerprint, source, started_at, links, offered_actions, wake_at, call_id, outcome, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)`,
       )
       .bind(
         incident.id,
@@ -93,6 +106,10 @@ export class Repo {
         incident.source,
         incident.startedAt,
         incident.links.length === 0 ? null : JSON.stringify(incident.links),
+        incident.offeredActions.length === 0
+          ? null
+          : JSON.stringify(incident.offeredActions),
+        incident.wakeAt,
         incident.callId,
         incident.outcome,
         incident.createdAt,
@@ -133,18 +150,28 @@ export class Repo {
     return row === null ? null : toIncident(row);
   }
 
-  /** Incidents whose call has not reported back, oldest first, for the reconciliation sweep. */
-  async findCallsWaitingSince(
-    updatedBefore: string,
+  /**
+   * Incidents that have sat in one open state longer than that state is allowed to last, oldest
+   * first. Every open state is covered, not just the one waiting on a call: an incident that stops
+   * anywhere counts as open, and an open incident answers every later repeat of its alert as a
+   * duplicate, so any uncovered state is a way to silence a service for good.
+   *
+   * A snooze is timed by its own deadline rather than by how long ago it was written, because the
+   * responder chose that deadline out loud.
+   */
+  async findStalledIncidents(
+    thresholds: { active: string; escalating: string; now: string },
     limit: number,
   ): Promise<Incident[]> {
     const { results } = await this.db
       .prepare(
         `SELECT * FROM incidents
-         WHERE state = 'calling' AND updated_at < ?1
-         ORDER BY updated_at ASC LIMIT ?2`,
+         WHERE (state IN ('received', 'calling', 'deciding', 'acting') AND updated_at < ?1)
+            OR (state = 'escalating' AND updated_at < ?2)
+            OR (state = 'snoozed' AND wake_at IS NOT NULL AND wake_at <= ?3)
+         ORDER BY updated_at ASC LIMIT ?4`,
       )
-      .bind(updatedBefore, limit)
+      .bind(thresholds.active, thresholds.escalating, thresholds.now, limit)
       .all<IncidentRow>();
     return results.map(toIncident);
   }
@@ -156,21 +183,23 @@ export class Repo {
    */
   async updateIncident(
     id: string,
-    patch: Partial<Pick<Incident, "state" | "callId" | "outcome">>,
+    patch: IncidentPatch,
     at: string,
   ): Promise<void> {
-    const columns: Record<keyof typeof patch, string> = {
+    const columns: Record<keyof IncidentPatch, string> = {
       state: "state",
       callId: "call_id",
       outcome: "outcome",
+      wakeAt: "wake_at",
+      offeredActions: "offered_actions",
     };
 
     const assignments: string[] = [];
     const values: (string | null)[] = [];
-    for (const key of Object.keys(columns) as (keyof typeof columns)[]) {
+    for (const key of Object.keys(columns) as (keyof IncidentPatch)[]) {
       if (!(key in patch)) continue;
       assignments.push(`${columns[key]} = ?`);
-      values.push(patch[key] ?? null);
+      values.push(encodePatchValue(patch[key]));
     }
     assignments.push(`updated_at = ?`);
     values.push(at);
@@ -297,36 +326,48 @@ export class Repo {
    */
   async claimEvent(
     eventId: string,
+    claimId: string,
     at: string,
     staleBefore: string,
   ): Promise<boolean> {
     const result = await this.db
       .prepare(
-        `INSERT INTO processed_events (event_id, received_at, status, completed_at)
-         VALUES (?1, ?2, 'in_flight', NULL)
-         ON CONFLICT (event_id) DO UPDATE SET received_at = ?2
+        `INSERT INTO processed_events (event_id, received_at, status, completed_at, claim_id)
+         VALUES (?1, ?2, 'in_flight', NULL, ?4)
+         ON CONFLICT (event_id) DO UPDATE SET received_at = ?2, claim_id = ?4
          WHERE processed_events.status = 'in_flight' AND processed_events.received_at < ?3`,
       )
-      .bind(eventId, at, staleBefore)
+      .bind(eventId, at, staleBefore, claimId)
       .run();
     return (result.meta.changes ?? 0) > 0;
   }
 
-  async completeEvent(eventId: string, at: string): Promise<void> {
+  async completeEvent(
+    eventId: string,
+    claimId: string,
+    at: string,
+  ): Promise<void> {
     await this.db
       .prepare(
-        `UPDATE processed_events SET status = 'done', completed_at = ?2 WHERE event_id = ?1`,
+        `UPDATE processed_events SET status = 'done', completed_at = ?3
+         WHERE event_id = ?1 AND claim_id = ?2`,
       )
-      .bind(eventId, at)
+      .bind(eventId, claimId, at)
       .run();
   }
 
-  async releaseEvent(eventId: string): Promise<void> {
+  /**
+   * Only the delivery that still holds the claim may give it back. A delivery slow enough to lose
+   * its claim to a takeover would otherwise delete the row belonging to whoever took it, and the
+   * event id would quietly stop being a deduplication key at all.
+   */
+  async releaseEvent(eventId: string, claimId: string): Promise<void> {
     await this.db
       .prepare(
-        `DELETE FROM processed_events WHERE event_id = ?1 AND status = 'in_flight'`,
+        `DELETE FROM processed_events
+         WHERE event_id = ?1 AND claim_id = ?2 AND status = 'in_flight'`,
       )
-      .bind(eventId)
+      .bind(eventId, claimId)
       .run();
   }
 
@@ -373,6 +414,11 @@ function toIncident(row: IncidentRow): Incident {
     source: row.source,
     startedAt: row.started_at,
     links: row.links === null ? [] : (JSON.parse(row.links) as IncidentLink[]),
+    offeredActions:
+      row.offered_actions === null
+        ? []
+        : (JSON.parse(row.offered_actions) as string[]),
+    wakeAt: row.wake_at,
     callId: row.call_id,
     outcome: row.outcome,
     createdAt: row.created_at,

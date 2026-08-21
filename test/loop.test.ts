@@ -194,6 +194,90 @@ describe("the whole loop", () => {
   });
 
   /**
+   * A call that is still running carries no decision. Answering one as though it were terminal
+   * spends the incident's only move out of `calling`, and the decision the responder is at that
+   * moment giving is then dropped in silence when it arrives. Two ordinary HTTP requests from
+   * anywhere would have disarmed the on-call system for that incident and, because the incident
+   * stays open, silenced every later repeat of that alert.
+   */
+  it("ignores a delivery about a call that is still running", async () => {
+    const response = await postAlert({
+      service: "checkout",
+      title: "Payment errors above 20 percent",
+    });
+    const accepted = (await response.json()) as { incident: string };
+
+    const stillRinging = await env.DB.prepare(
+      `SELECT snapshot FROM fake_calls`,
+    ).first<{ snapshot: string }>();
+    const queued = JSON.parse(stillRinging?.snapshot ?? "{}") as CallSnapshot;
+
+    const early = await SELF.fetch("https://ringbolt.test/webhooks/calle", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "CALL-E-Event-Id": "evt_too_early",
+      },
+      body: JSON.stringify({
+        id: "evt_too_early",
+        type: "call.completed",
+        created_at: new Date().toISOString(),
+        data: { id: queued.id },
+      }),
+    });
+
+    expect(early.status).toBe(200);
+    expect(await early.json()).toMatchObject({
+      ignored: "the call is still running",
+    });
+
+    const claims = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM processed_events`,
+    ).first<{ n: number }>();
+    expect(claims?.n).toBe(0);
+
+    const repo = new Repo(env.DB);
+    expect((await repo.getIncident(accepted.incident))?.state).toBe("calling");
+
+    const call = await terminalCallFor(accepted.incident);
+    expect((await deliverWebhook(call)).status).toBe(200);
+    expect((await repo.getIncident(accepted.incident))?.state).toBe("resolved");
+  });
+
+  it("does not publish the call id on the unauthenticated read api", async () => {
+    await postAlert({ service: "checkout", title: "down" });
+
+    const list = (await (
+      await SELF.fetch("https://ringbolt.test/api/incidents")
+    ).json()) as { incidents: Record<string, unknown>[] };
+    expect(list.incidents).toHaveLength(1);
+    expect(list.incidents[0]).not.toHaveProperty("callId");
+
+    const detail = (await (
+      await SELF.fetch(
+        `https://ringbolt.test/api/incidents/${String(list.incidents[0]?.["id"])}`,
+      )
+    ).json()) as { incident: Record<string, unknown> };
+    expect(detail.incident).not.toHaveProperty("callId");
+  });
+
+  /**
+   * An alert template rendering an empty variable into this field would otherwise give every
+   * service in the estate the same identity, so one incident and one phone call between them all,
+   * and one Durable Object serialising the lot. The sender got a 202 and no signal.
+   */
+  it("rejects a blank fingerprint rather than collapsing the estate into one incident", async () => {
+    const response = await postAlert({
+      service: "checkout",
+      title: "down",
+      fingerprint: "",
+    });
+
+    expect(response.status).toBe(422);
+    expect(JSON.stringify(await response.json())).toContain("fingerprint");
+  });
+
+  /**
    * CALL-E documents the event id as a required header. The body is the half an anonymous caller
    * writes, and this endpoint cannot be authenticated, so a delivery with no header is refused
    * rather than trusted on the body alone.
