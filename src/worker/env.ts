@@ -6,10 +6,21 @@ import { z } from "zod";
  * at the edge of the request and refuse to serve on a bad configuration rather than failing
  * halfway through placing a phone call.
  */
+/**
+ * A dotenv file spells "not set" as a name with nothing after the equals sign, and `.env.example`
+ * ships exactly that for every value an operator fills in later. Reading a blank as absent is what
+ * makes that file copyable: without it, copying it and starting the stand-in fails on an intake
+ * token nobody had set yet, and a blank API key in live mode complains about its length rather
+ * than saying it is missing.
+ */
+function blankIsAbsent<T extends z.ZodType>(schema: T) {
+  return z.preprocess((value) => (value === "" ? undefined : value), schema);
+}
+
 const shared = {
   RINGBOLT_ENV: z.enum(["development", "preview", "production"]),
   PUBLIC_BASE_URL: z.url(),
-  INTAKE_TOKEN: z.string().min(16).optional(),
+  INTAKE_TOKEN: blankIsAbsent(z.string().min(16).optional()),
   /** How long the local stand-in waits before a call reaches a terminal state. Fake mode only. */
   CALLE_FAKE_DELAY_MS: z.coerce
     .number()
@@ -39,14 +50,14 @@ const envSchema = z.discriminatedUnion("CALLE_MODE", [
   z.object({
     ...shared,
     CALLE_MODE: z.literal("fake"),
-    CALLE_API_KEY: z.string().optional(),
-    DEMO_PHONE: z.string().optional(),
+    CALLE_API_KEY: blankIsAbsent(z.string().optional()),
+    DEMO_PHONE: blankIsAbsent(z.string().optional()),
   }),
   z.object({
     ...shared,
     CALLE_MODE: z.literal("live"),
-    CALLE_API_KEY: z.string().min(1),
-    DEMO_PHONE: phoneNumber,
+    CALLE_API_KEY: blankIsAbsent(z.string().min(1)),
+    DEMO_PHONE: blankIsAbsent(phoneNumber),
   }),
 ]);
 

@@ -61,6 +61,20 @@ describe("reading the configuration", () => {
     expect(readConfig(live, { liveAvailable: true }).CALLE_MODE).toBe("live");
   });
 
+  /**
+   * `.env.example` ships every fill-in-later value blank and the README says to copy it, so a
+   * blank has to mean absent. Otherwise the first thing a new copy of the file does is fail on a
+   * token nobody had set yet.
+   */
+  it("reads a blank value as one that was never set", () => {
+    expect(
+      readConfig({ ...base, INTAKE_TOKEN: "" }).INTAKE_TOKEN,
+    ).toBeUndefined();
+    expect(() => readConfig({ ...live, CALLE_API_KEY: "" })).toThrow(
+      ConfigurationError,
+    );
+  });
+
   it("names what is wrong rather than failing anonymously", () => {
     try {
       readConfig({ ...base, PUBLIC_BASE_URL: "not-a-url" });
