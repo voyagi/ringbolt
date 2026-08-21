@@ -3,6 +3,16 @@ export type JsonObject = Record<string, unknown>;
 export type CallStatus =
   "queued" | "in_progress" | "completed" | "failed" | "canceled";
 
+/**
+ * Whether a call is over. Every path that acts on a call reads this one function: a call that is
+ * still running has no decision in it yet, and treating it as though it did spends the incident's
+ * one move out of `calling` on nothing, which then discards the decision the responder is at that
+ * moment still giving.
+ */
+export function isTerminalCall(status: CallStatus): boolean {
+  return status === "completed" || status === "failed" || status === "canceled";
+}
+
 export type TranscriptTurn = {
   offsetSeconds: number | null;
   speaker: "bot" | "user" | "unknown";

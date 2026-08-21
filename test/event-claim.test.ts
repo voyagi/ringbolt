@@ -17,8 +17,8 @@ describe("claiming a webhook event id", () => {
 
   it("gives the id to exactly one of two deliveries", async () => {
     const results = await Promise.all([
-      repo.claimEvent("evt_a", NOW, TWO_MINUTES_EARLIER),
-      repo.claimEvent("evt_a", NOW, TWO_MINUTES_EARLIER),
+      repo.claimEvent("evt_a", "claim_one", NOW, TWO_MINUTES_EARLIER),
+      repo.claimEvent("evt_a", "claim_two", NOW, TWO_MINUTES_EARLIER),
     ]);
     expect(results.filter(Boolean)).toHaveLength(1);
   });
@@ -29,26 +29,30 @@ describe("claiming a webhook event id", () => {
    * answered as a duplicate. Releasing puts the decision back within reach.
    */
   it("lets a retry through after a failed delivery releases the id", async () => {
-    expect(await repo.claimEvent("evt_b", NOW, TWO_MINUTES_EARLIER)).toBe(true);
-    expect(await repo.claimEvent("evt_b", NOW, TWO_MINUTES_EARLIER)).toBe(
-      false,
-    );
+    expect(
+      await repo.claimEvent("evt_b", "claim_one", NOW, TWO_MINUTES_EARLIER),
+    ).toBe(true);
+    expect(
+      await repo.claimEvent("evt_b", "claim_two", NOW, TWO_MINUTES_EARLIER),
+    ).toBe(false);
 
-    await repo.releaseEvent("evt_b");
-    expect(await repo.claimEvent("evt_b", NOW, TWO_MINUTES_EARLIER)).toBe(true);
+    await repo.releaseEvent("evt_b", "claim_one");
+    expect(
+      await repo.claimEvent("evt_b", "claim_three", NOW, TWO_MINUTES_EARLIER),
+    ).toBe(true);
   });
 
   it("keeps the id for good once the work is complete", async () => {
-    await repo.claimEvent("evt_c", NOW, TWO_MINUTES_EARLIER);
-    await repo.completeEvent("evt_c", NOW);
+    await repo.claimEvent("evt_c", "claim_one", NOW, TWO_MINUTES_EARLIER);
+    await repo.completeEvent("evt_c", "claim_one", NOW);
 
-    expect(await repo.claimEvent("evt_c", LATER, STALE_BEFORE_LATER)).toBe(
-      false,
-    );
-    await repo.releaseEvent("evt_c");
-    expect(await repo.claimEvent("evt_c", LATER, STALE_BEFORE_LATER)).toBe(
-      false,
-    );
+    expect(
+      await repo.claimEvent("evt_c", "claim_two", LATER, STALE_BEFORE_LATER),
+    ).toBe(false);
+    await repo.releaseEvent("evt_c", "claim_one");
+    expect(
+      await repo.claimEvent("evt_c", "claim_two", LATER, STALE_BEFORE_LATER),
+    ).toBe(false);
   });
 
   /**
@@ -56,16 +60,52 @@ describe("claiming a webhook event id", () => {
    * decision is stranded exactly as it was before.
    */
   it("takes over a claim left in flight by a delivery that never came back", async () => {
-    expect(await repo.claimEvent("evt_d", NOW, TWO_MINUTES_EARLIER)).toBe(true);
-    expect(await repo.claimEvent("evt_d", LATER, STALE_BEFORE_LATER)).toBe(
-      true,
-    );
+    expect(
+      await repo.claimEvent("evt_d", "claim_one", NOW, TWO_MINUTES_EARLIER),
+    ).toBe(true);
+    expect(
+      await repo.claimEvent("evt_d", "claim_two", LATER, STALE_BEFORE_LATER),
+    ).toBe(true);
+  });
+
+  /**
+   * The claim has an owner for this: a delivery slow enough to lose its claim used to release on
+   * the way out anyway, deleting the row belonging to whoever took it over, and the event id then
+   * quietly stopped being a deduplication key at all.
+   */
+  it("will not let a delivery that lost its claim release or complete another one's", async () => {
+    await repo.claimEvent("evt_e", "claim_slow", NOW, TWO_MINUTES_EARLIER);
+    expect(
+      await repo.claimEvent("evt_e", "claim_fast", LATER, STALE_BEFORE_LATER),
+    ).toBe(true);
+
+    await repo.releaseEvent("evt_e", "claim_slow");
+    await repo.completeEvent("evt_e", "claim_slow", LATER);
+
+    const row = await env.DB.prepare(
+      `SELECT claim_id, status FROM processed_events WHERE event_id = 'evt_e'`,
+    ).first<{ claim_id: string; status: string }>();
+    expect(row).toMatchObject({ claim_id: "claim_fast", status: "in_flight" });
+
+    await repo.completeEvent("evt_e", "claim_fast", LATER);
+    expect(
+      await repo.claimEvent("evt_e", "claim_third", LATER, STALE_BEFORE_LATER),
+    ).toBe(false);
   });
 
   it("removes ids past their retention window and keeps recent ones", async () => {
-    await repo.claimEvent("evt_old", "2026-07-01T00:00:00.000Z", NOW);
-    await repo.completeEvent("evt_old", "2026-07-01T00:00:00.000Z");
-    await repo.claimEvent("evt_new", NOW, TWO_MINUTES_EARLIER);
+    await repo.claimEvent(
+      "evt_old",
+      "claim_old",
+      "2026-07-01T00:00:00.000Z",
+      NOW,
+    );
+    await repo.completeEvent(
+      "evt_old",
+      "claim_old",
+      "2026-07-01T00:00:00.000Z",
+    );
+    await repo.claimEvent("evt_new", "claim_new", NOW, TWO_MINUTES_EARLIER);
 
     expect(await repo.pruneProcessedEvents("2026-08-01T00:00:00.000Z")).toBe(1);
 

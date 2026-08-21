@@ -36,7 +36,9 @@ alert  ->  policy  ->  phone call  ->  spoken decision  ->  authorization  ->  a
    land in one record.
 
 A webhook that never arrives does not lose the decision. A sweep re-reads any call that has not
-reported back, so the incident finishes either way.
+reported back: one that finished is carried through exactly as the webhook would have, and one that
+never finished is handed to escalation rather than left sitting there. Nothing an incident can do
+leaves it stuck, because an incident that is stuck is an alert that has silently stopped ringing.
 
 Two steps of that list are still ahead of the code, and the Status section below says where they
 are: the routing policy that decides whether an alert is worth a call at all, and the rotation that

@@ -52,6 +52,8 @@ describe("patching an incident", () => {
     source: null,
     startedAt: null,
     links: [],
+    offeredActions: ["kill_switch"],
+    wakeAt: null,
     createdAt: "2026-08-21T12:00:00.000Z",
     updatedAt: "2026-08-21T12:00:00.000Z",
     callId: "call_one",
@@ -79,6 +81,7 @@ describe("patching an incident", () => {
     const cleared = await repo.getIncident(incident.id);
     expect(cleared?.callId).toBeNull();
     expect(cleared?.state).toBe("calling");
+    expect(cleared?.offeredActions).toEqual(["kill_switch"]);
     expect(cleared?.updatedAt).toBe("2026-08-21T12:01:00.000Z");
   });
 });

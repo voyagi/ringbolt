@@ -130,17 +130,40 @@ describe("what the responder said decides where the incident lands", () => {
 
   it("snoozes with the minutes kept rather than parsed and dropped", async () => {
     const incident = await anIncidentWaitingOnADecision();
+    const before = Date.now();
     await orchestratorWith(stubPlacer("fake")).onCallTerminal(
       snapshotFor(incident, { decision: "snooze", snooze_minutes: 45 }),
     );
 
-    expect((await stateOf(incident.id)).state).toBe("snoozed");
+    const snoozed = await stateOf(incident.id);
+    expect(snoozed.state).toBe("snoozed");
     const events = await new Repo(env.DB).listEvents(incident.id);
     const refusal = events.find((event) => event.kind === "action.refused");
     expect(refusal?.data).toMatchObject({
       decision: "snooze",
       snoozeMinutes: 45,
     });
+
+    // The deadline is a value the sweep can read, not a sentence in the audit trail.
+    expect(snoozed.wakeAt).not.toBeNull();
+    expect(Date.parse(snoozed.wakeAt ?? "")).toBeGreaterThanOrEqual(
+      before + 45 * 60_000,
+    );
+  });
+
+  it("ignores a snapshot for a call that has not finished", async () => {
+    const incident = await anIncidentWaitingOnADecision();
+    const running = {
+      ...snapshotFor(incident, {
+        decision: "run_action",
+        action_id: "kill_switch",
+      }),
+      status: "in_progress" as const,
+    } as VerifiedCall;
+
+    await orchestratorWith(stubPlacer("fake")).onCallTerminal(running);
+
+    expect((await stateOf(incident.id)).state).toBe("calling");
   });
 
   it("keeps a mechanical refusal in escalating", async () => {
@@ -151,6 +174,46 @@ describe("what the responder said decides where the incident lands", () => {
       confidenceScore: 0.2,
     } as VerifiedCall);
     expect((await stateOf(incident.id)).state).toBe("escalating");
+  });
+
+  /**
+   * The set that authorizes has to be the set the responder heard. Recomputing the offer when the
+   * decision comes back would authorize against whatever policy says minutes later, which is the
+   * same defect as looking an action id up in a different list, one level further out. Phase 3 is
+   * when actionsFor starts filtering per service, and that is when a policy edit during a call
+   * would otherwise let through an action nobody read out.
+   */
+  it("refuses an action that was not read out on the call", async () => {
+    const incident = await anIncidentWaitingOnADecision();
+    await env.DB.prepare(
+      `UPDATE incidents SET offered_actions = ?2 WHERE id = ?1`,
+    )
+      .bind(incident.id, JSON.stringify(["rollback"]))
+      .run();
+
+    await orchestratorWith(stubPlacer("fake")).onCallTerminal(
+      snapshotFor(incident, {
+        decision: "run_action",
+        action_id: "kill_switch",
+      }),
+    );
+
+    expect((await stateOf(incident.id)).state).toBe("escalating");
+    expect((await stateOf(incident.id)).outcome).toBe(
+      "action_not_offered:run_action",
+    );
+    const runs = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM action_runs`,
+    ).first<{ n: number }>();
+    expect(runs?.n).toBe(0);
+  });
+
+  it("records what was read out so the decision can be checked against it", async () => {
+    const incident = await anIncidentWaitingOnADecision();
+    expect((await stateOf(incident.id)).offeredActions).toEqual([
+      "kill_switch",
+      "rollback",
+    ]);
   });
 
   it("a snoozed incident still collapses a repeat of the same alert", async () => {

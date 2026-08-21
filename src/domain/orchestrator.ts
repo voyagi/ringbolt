@@ -1,5 +1,5 @@
 import { type RunbookAction, actionsFor } from "../actions/registry.js";
-import type { CallPlacer } from "../calle/port.js";
+import { type CallPlacer, isTerminalCall } from "../calle/port.js";
 import type { VerifiedCall } from "../calle/verify.js";
 import { type Repo, isDuplicateOpenIncident } from "../db/repo.js";
 import {
@@ -43,6 +43,37 @@ export type OpenResult =
   | { kind: "duplicate"; incident: Incident }
   | { kind: "call_failed"; incident: Incident; detail: string };
 
+/** How long a snooze lasts when the responder asked for one without saying how long. */
+const DEFAULT_SNOOZE_MINUTES = 30;
+
+/**
+ * Every way an incident can stop somewhere it cannot leave on its own, and where each one goes.
+ * `from` is checked before the move, so a sweep acting on a stale read cannot push an incident that
+ * has since moved on. Nothing here is a normal outcome: each is a record for a human to read.
+ */
+export const stallResolution = {
+  call_never_placed: { from: "received", to: "failed" },
+  decision_not_completed: { from: "deciding", to: "escalating" },
+  action_outcome_unknown: { from: "acting", to: "failed" },
+  escalation_unhandled: { from: "escalating", to: "failed" },
+  snooze_expired: { from: "snoozed", to: "failed" },
+} as const satisfies Record<string, { from: IncidentState; to: IncidentState }>;
+
+export type StallReason = keyof typeof stallResolution;
+
+const stallDetail: Record<StallReason, string> = {
+  call_never_placed:
+    "The incident was opened but no call was ever confirmed placed, so it is closed. The next repeat of this alert opens a fresh one.",
+  decision_not_completed:
+    "The call ended but the decision was never carried through, so this needs a person.",
+  action_outcome_unknown:
+    "The action started and never reported back. Whether it took effect is unknown, so nothing is retried and this needs a person.",
+  escalation_unhandled:
+    "This was escalated and nobody picked it up. There is no rotation to hand it to yet, so it is closed rather than left holding the alert.",
+  snooze_expired:
+    "The snooze ran out. Calling back is the rotation's job and that is not built, so it is closed and the next repeat of this alert rings again.",
+};
+
 export class Orchestrator {
   constructor(private readonly deps: OrchestratorDeps) {}
 
@@ -61,6 +92,12 @@ export class Orchestrator {
    * from the CALL-E API under our own key.
    */
   async onCallTerminal(snapshot: VerifiedCall): Promise<void> {
+    // A call that is still running carries no decision. Moving the incident out of `calling` on one
+    // would spend its only move out of that state on nothing, and the decision the responder is at
+    // that moment giving would then be dropped when it arrives. Both callers get this guard here
+    // rather than each keeping their own, which is how the webhook path and the sweep drifted.
+    if (!isTerminalCall(snapshot.status)) return;
+
     const incidentId = incidentIdOf(snapshot);
     if (incidentId === null) return;
 
@@ -86,7 +123,7 @@ export class Orchestrator {
       taskCompleted: snapshot.taskCompleted,
       confidenceScore: snapshot.confidenceScore,
       structuredResult: snapshot.structuredResult,
-      offered: actionsFor(incident.service),
+      offered: stillOffered(incident),
     });
 
     if (!authorization.authorized) {
@@ -143,6 +180,8 @@ export class Orchestrator {
       source: alert.source ?? null,
       startedAt: alert.startedAt ?? null,
       links: alert.links ?? [],
+      offeredActions: [],
+      wakeAt: null,
       createdAt: at,
       updatedAt: at,
       callId: null,
@@ -220,9 +259,10 @@ export class Orchestrator {
     }
 
     const state = transition(incident.state, "calling");
+    const offeredActions = offered.map((action) => action.id);
     await this.deps.repo.updateIncident(
       incident.id,
-      { state, callId: call.id },
+      { state, callId: call.id, offeredActions },
       at,
     );
     await this.record(
@@ -232,7 +272,7 @@ export class Orchestrator {
       {
         callId: call.id,
         placer: this.deps.placer.kind,
-        offered: offered.map((action) => action.id),
+        offered: offeredActions,
       },
     );
 
@@ -242,7 +282,13 @@ export class Orchestrator {
 
     return {
       kind: "created",
-      incident: { ...incident, state, callId: call.id, updatedAt: at },
+      incident: {
+        ...incident,
+        state,
+        callId: call.id,
+        offeredActions,
+        updatedAt: at,
+      },
     };
   }
 
@@ -280,25 +326,67 @@ export class Orchestrator {
     incident: Incident,
     refusal: Refusal<RunbookAction>,
   ): Promise<void> {
-    const at = this.deps.now().toISOString();
+    const now = this.deps.now();
+    const at = now.toISOString();
     const spoken = refusal.decision;
+    const nextState = stateAfterRefusal(refusal);
+    const minutes = spoken?.snooze_minutes ?? DEFAULT_SNOOZE_MINUTES;
+
     // Refusing to act is a normal outcome, not an error. It always leaves a record naming why,
     // because a human is going to want to know what the system heard.
     await this.deps.repo.updateIncident(
       incident.id,
       {
-        state: transition("deciding", stateAfterRefusal(refusal)),
+        state: transition("deciding", nextState),
         outcome:
           spoken === undefined
             ? refusal.refusal
             : `${refusal.refusal}:${spoken.decision}`,
+        // A snooze is the one refusal that names its own deadline, and the sweep needs that
+        // deadline as a value rather than as a sentence in the audit trail.
+        wakeAt:
+          nextState === "snoozed"
+            ? new Date(now.getTime() + minutes * 60_000).toISOString()
+            : null,
       },
       at,
     );
     await this.record(incident.id, "action.refused", refusal.detail, {
       refusal: refusal.refusal,
       decision: spoken?.decision ?? null,
-      snoozeMinutes: spoken?.snooze_minutes ?? null,
+      snoozeMinutes: nextState === "snoozed" ? minutes : null,
+    });
+  }
+
+  /**
+   * Moves an incident that has stopped somewhere it cannot leave on its own into a state it can be
+   * seen from, and frees its fingerprint so the next repeat of that alert rings again.
+   *
+   * It never re-runs anything. Once an incident has stalled, Ringbolt does not know whether the
+   * remediation ran, and a product built on never acting on a guess does not get to guess here
+   * either. Closing it and naming why is the honest answer; a human reads the record.
+   */
+  async closeStalled(incidentId: string, reason: StallReason): Promise<void> {
+    const incident = await this.deps.exclusive(async () => {
+      const found = await this.deps.repo.getIncident(incidentId);
+      if (found === null) return null;
+      const next = stallResolution[reason];
+      if (found.state !== next.from) return null;
+
+      const at = this.deps.now().toISOString();
+      const state = transition(found.state, next.to);
+      await this.deps.repo.updateIncident(
+        found.id,
+        { state, outcome: reason, wakeAt: null },
+        at,
+      );
+      return { ...found, state, updatedAt: at };
+    });
+    if (incident === null) return;
+
+    await this.record(incident.id, "incident.stalled", stallDetail[reason], {
+      reason,
+      wasIn: stallResolution[reason].from,
     });
   }
 
@@ -367,6 +455,18 @@ export class Orchestrator {
 export function incidentIdOf(snapshot: VerifiedCall): string | null {
   const value = snapshot.metadata["incident_id"];
   return typeof value === "string" ? value : null;
+}
+
+/**
+ * The actions that were read out on this call and are still permitted now. Recomputing the offer at
+ * decision time would authorize against a set the responder never heard, which is the same defect
+ * as looking an action id up in a different list, one level further out. An intersection is the
+ * safe direction on both sides: a policy that has since withdrawn an action cannot run it, and an
+ * action added since the call was placed was never on the table.
+ */
+function stillOffered(incident: Incident): readonly RunbookAction[] {
+  const spoken = new Set(incident.offeredActions);
+  return actionsFor(incident.service).filter((action) => spoken.has(action.id));
 }
 
 /**

@@ -110,6 +110,13 @@ network call is not CPU time.
 
 Accepted costs, stated rather than discovered later:
 
+- Every open state needs a way out, and until phase 3 that way out is a sweep rather than a
+  rotation. An incident that stops moving counts as open, and an open incident answers every later
+  repeat of its alert as a duplicate, so a state with no exit is a way to silence a service for
+  good with no signal to anyone. The sweep therefore bounds all of them, and where it cannot
+  recover it closes the incident and records why. It never re-runs a remediation: once an incident
+  has stalled, Ringbolt does not know whether the action took effect, and a product built on not
+  acting on a guess does not get to guess there either.
 - One storage system today, not two. D1 holds every record, and the Durable Object holds no state
   of its own: what it provides is a single owner per incident and the section that makes a
   read-then-write safe. The consequence originally written here, that the object would be the

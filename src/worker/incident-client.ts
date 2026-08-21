@@ -1,6 +1,6 @@
 import type { VerifiedCall } from "../calle/verify.js";
 import type { AlertPayload } from "../domain/incident.js";
-import type { OpenResult } from "../domain/orchestrator.js";
+import type { OpenResult, StallReason } from "../domain/orchestrator.js";
 import type { Bindings } from "./env.js";
 
 /**
@@ -12,6 +12,7 @@ export interface IncidentActor {
   open(alert: AlertPayload): Promise<OpenResult>;
   callTerminal(snapshot: VerifiedCall): Promise<void>;
   abandonCall(incidentId: string, detail: string): Promise<void>;
+  closeStalled(incidentId: string, reason: StallReason): Promise<void>;
 }
 
 /**
