@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ringbolt board, direction B</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=BioRhyme+Expanded:wght@700;800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Martian+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --ochre: #d99a16;
+        --ochre-dark: #b47f0f;
+        --log: #ffe8a3;
+        --tide: #0a665e;
+        --sig-blue: #1666a8;
+        --red: #d62f32;
+        --ink: #192e2c;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--ochre);
+        color: var(--ink);
+        font-family: "Atkinson Hyperlegible", sans-serif;
+        font-size: 15px;
+        line-height: 1.5;
+      }
+      .plate {
+        font-family: "BioRhyme Expanded", serif;
+        font-weight: 800;
+        letter-spacing: -0.01em;
+        line-height: 0.95;
+      }
+      .mono {
+        font-family: "Martian Mono", monospace;
+        font-variant-numeric: tabular-nums;
+        font-size: 0.82em;
+      }
+
+      header.beam {
+        height: 104px;
+        display: grid;
+        grid-template-columns: 300px 1fr auto;
+        align-items: center;
+        gap: 28px;
+        padding: 0 26px;
+        background: var(--ink);
+        color: var(--log);
+      }
+      .wordmark {
+        font-size: 30px;
+        text-transform: uppercase;
+      }
+      .wordmark span {
+        color: var(--ochre);
+      }
+      .plates {
+        display: flex;
+        gap: 6px;
+      }
+      .plates a {
+        padding: 12px 20px;
+        font-family: "Atkinson Hyperlegible", sans-serif;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        font-size: 12px;
+        color: var(--log);
+        text-decoration: none;
+        background: rgba(255, 232, 163, 0.1);
+      }
+      .plates a.on {
+        background: var(--ochre);
+        color: var(--ink);
+      }
+      .watch {
+        text-align: right;
+      }
+      .watch .t {
+        font-size: 26px;
+      }
+      .watch .who {
+        font-size: 12px;
+        opacity: 0.85;
+      }
+
+      .body {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        min-height: calc(100vh - 162px);
+      }
+      main {
+        padding: 0 26px 26px;
+      }
+      aside {
+        background: var(--ink);
+        color: var(--log);
+        padding: 22px;
+        border-left: 8px solid var(--ochre-dark);
+      }
+      aside h4 {
+        font-family: "Atkinson Hyperlegible", sans-serif;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        font-size: 11px;
+        margin: 0 0 12px;
+        opacity: 0.8;
+      }
+      .night {
+        aspect-ratio: 3 / 4;
+        background:
+          radial-gradient(
+            120px 90px at 62% 34%,
+            rgba(255, 214, 120, 0.55),
+            transparent 70%
+          ),
+          linear-gradient(#0b1a19, #10231f 55%, #0a1413);
+        border: 1px solid rgba(255, 232, 163, 0.25);
+        position: relative;
+      }
+      .night .lamp {
+        position: absolute;
+        left: 58%;
+        top: 30%;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #ffd98a;
+        box-shadow: 0 0 26px 8px rgba(255, 217, 138, 0.5);
+      }
+      .night .quay {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 34%;
+        background: linear-gradient(#0a1413, #060d0c);
+        border-top: 1px solid rgba(255, 232, 163, 0.18);
+      }
+      .night figcaption {
+        position: absolute;
+        left: 8px;
+        bottom: 8px;
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: rgba(255, 232, 163, 0.75);
+      }
+
+      .rail {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        padding: 20px 0 8px;
+        border-bottom: 4px solid var(--ink);
+      }
+      .rail h2 {
+        margin: 0;
+        font-size: 20px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .rail .count {
+        font-size: 12px;
+      }
+
+      .slat {
+        display: grid;
+        grid-template-columns: 18px 1fr 200px 190px 140px;
+        align-items: center;
+        gap: 18px;
+        padding: 15px 0;
+        border-bottom: 2px solid rgba(25, 46, 44, 0.25);
+      }
+      .lamp-cell i {
+        display: block;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+      }
+      .svc {
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .svc .why {
+        display: block;
+        font-size: 13px;
+        font-weight: 400;
+        opacity: 0.8;
+      }
+      .who-called {
+        font-size: 13px;
+      }
+      .decision {
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .astate {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+
+      .bay {
+        background: var(--log);
+        border: 3px solid var(--ink);
+        margin: 16px 0 24px;
+      }
+      .bay .hd {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 20px;
+        padding: 20px 24px 14px;
+        background: var(--ochre-dark);
+        color: var(--log);
+      }
+      .bay h3 {
+        margin: 0;
+        font-size: 22px;
+        text-transform: uppercase;
+      }
+      .bay .hd .meta {
+        text-align: right;
+        font-size: 12px;
+      }
+
+      .timerail {
+        position: relative;
+        padding: 30px 24px 34px;
+      }
+      .timerail::before {
+        content: "";
+        position: absolute;
+        left: 24px;
+        right: 24px;
+        top: 50%;
+        height: 3px;
+        background: var(--ink);
+      }
+      .above,
+      .below {
+        display: flex;
+        gap: 10px;
+        align-items: flex-end;
+      }
+      .below {
+        align-items: flex-start;
+        margin-top: 10px;
+      }
+      .utt {
+        border: 2px solid var(--ink);
+        padding: 8px 10px;
+        font-size: 14px;
+        background: #fff8e1;
+      }
+      .above .utt {
+        border-bottom-width: 4px;
+        color: var(--sig-blue);
+      }
+      .below .utt {
+        border-top-width: 4px;
+      }
+      .utt .at {
+        display: block;
+        font-size: 10px;
+        opacity: 0.6;
+      }
+      .utt.auth {
+        border-color: var(--red);
+        color: var(--red);
+        font-weight: 700;
+      }
+
+      .tie {
+        height: 26px;
+        margin: 0 24px;
+        border-left: 4px solid var(--red);
+        margin-left: calc(24px + 62%);
+      }
+      .docket {
+        border-top: 3px solid var(--ink);
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+      }
+      .docket div {
+        padding: 14px 16px;
+        border-left: 2px solid rgba(25, 46, 44, 0.2);
+      }
+      .docket div:first-child {
+        border-left: 0;
+      }
+      .docket dt {
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0.65;
+      }
+      .docket dd {
+        margin: 5px 0 0;
+        font-size: 15px;
+        font-weight: 700;
+      }
+      .docket .ok {
+        color: var(--tide);
+      }
+
+      footer.track {
+        height: 58px;
+        background: var(--ink);
+        display: flex;
+        align-items: center;
+        padding: 0 26px;
+      }
+      footer.track .tick {
+        flex: 1;
+        height: 20px;
+        border-right: 1px solid rgba(255, 232, 163, 0.2);
+        position: relative;
+      }
+      footer.track .tick i {
+        position: absolute;
+        bottom: 0;
+        width: 4px;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="beam">
+      <div class="wordmark plate">Ring<span>bolt</span></div>
+      <nav class="plates">
+        <a class="on" href="#">Watch</a><a href="#">Incidents</a
+        ><a href="#">Lines</a><a href="#">Authority</a>
+      </nav>
+      <div class="watch">
+        <div class="t plate">03:14</div>
+        <div class="who mono">
+          line open &middot; yigal &middot; +31 6 ** ** 41 82
+        </div>
+      </div>
+    </header>
+
+    <div class="body">
+      <main>
+        <div class="rail">
+          <h2>On the telephone</h2>
+          <span class="count mono">1</span>
+        </div>
+
+        <section class="bay">
+          <div class="hd">
+            <h3 class="plate">checkout</h3>
+            <div class="meta mono">
+              payment errors above 20 percent<br />ringing 41s &middot;
+              call_9f2c1
+            </div>
+          </div>
+
+          <div class="timerail">
+            <div class="above">
+              <div class="utt">
+                <span class="at mono">00:04</span>Payment errors went from
+                nought point two to twenty three percent at two minutes past
+                two, after a deploy.
+              </div>
+              <div class="utt">
+                <span class="at mono">00:13</span>No. Search and accounts are
+                clean.
+              </div>
+            </div>
+            <div class="below">
+              <div class="utt" style="margin-left: 34%">
+                <span class="at mono">00:11</span>Is anything else touching
+                payments?
+              </div>
+              <div class="utt auth">
+                <span class="at mono">00:19</span>Roll it back.
+              </div>
+            </div>
+          </div>
+
+          <div class="tie"></div>
+
+          <dl class="docket">
+            <div>
+              <dt>Proposed</dt>
+              <dd>rollback</dd>
+            </div>
+            <div>
+              <dt>Spoken authority</dt>
+              <dd style="color: var(--red)">"roll it back"</dd>
+            </div>
+            <div>
+              <dt>Parameters</dt>
+              <dd class="mono">checkout</dd>
+            </div>
+            <div>
+              <dt>Stages</dt>
+              <dd class="mono">4 of 4</dd>
+            </div>
+            <div>
+              <dt>Result</dt>
+              <dd class="ok">2026.08.19-b restored</dd>
+            </div>
+          </dl>
+        </section>
+
+        <div class="rail">
+          <h2>Standing</h2>
+          <span class="count mono">3</span>
+        </div>
+
+        <div class="slat">
+          <div class="lamp-cell"><i style="background: var(--red)"></i></div>
+          <div class="svc">
+            search<span class="why">Latency above 5 seconds, p99</span>
+          </div>
+          <div class="who-called">Calling Yigal in 40s</div>
+          <div class="decision">Awaiting</div>
+          <div class="astate">2 offered</div>
+        </div>
+        <div class="slat">
+          <div class="lamp-cell">
+            <i style="background: var(--ochre-dark)"></i>
+          </div>
+          <div class="svc">
+            mailer<span class="why">Queue depth 12,400 and climbing</span>
+          </div>
+          <div class="who-called">No answer, next Taraneh</div>
+          <div class="decision">Escalating</div>
+          <div class="astate">2 offered</div>
+        </div>
+        <div class="slat">
+          <div class="lamp-cell"><i style="background: var(--tide)"></i></div>
+          <div class="svc">
+            imports<span class="why">Nightly job failed twice</span>
+          </div>
+          <div class="who-called">Held by Yigal 01:52</div>
+          <div class="decision">Hold</div>
+          <div class="astate">Kill switch on</div>
+        </div>
+      </main>
+
+      <aside>
+        <h4>Night window</h4>
+        <figure class="night" style="margin: 0">
+          <div class="lamp"></div>
+          <div class="quay"></div>
+          <figcaption>Hoek van Holland, lock room</figcaption>
+        </figure>
+        <h4 style="margin-top: 22px">Evidence</h4>
+        <p class="mono" style="font-size: 11px; line-height: 1.7">
+          14:02:11 deploy 2026.08.19-c<br />14:03:40 5xx 0.2% -&gt; 23%<br />14:04:02
+          alert raised<br />14:04:09 call placed
+        </p>
+      </aside>
+    </div>
+
+    <footer class="track">
+      <div class="tick">
+        <i style="background: var(--sig-blue); left: 20%"></i>
+      </div>
+      <div class="tick">
+        <i style="background: var(--ochre); left: 60%"></i>
+      </div>
+      <div class="tick">
+        <i style="background: var(--red); left: 10%"></i
+        ><i style="background: var(--red); left: 70%"></i>
+      </div>
+      <div class="tick">
+        <i style="background: var(--sig-blue); left: 35%"></i>
+      </div>
+      <div class="tick"></div>
+      <div class="tick"><i style="background: var(--red); left: 80%"></i></div>
+    </footer>
+  </body>
+</html>

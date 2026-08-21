@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ringbolt, the watch board</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Martian+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --chassis: #d99a16;
+        --chassis-deep: #a8760c;
+        --log: #ffeec2;
+        --ink: #172b29;
+        --tide: #0a665e;
+        --sig-blue: #14568c;
+        --sig-red: #c8202a;
+        --sig-yellow: #ffc400;
+        --rule: rgba(23, 43, 41, 0.28);
+        --panel: var(--log);
+        --on-chassis: var(--ink);
+        --on-deep: var(--log);
+      }
+      [data-watch="night"] {
+        --chassis: #123330;
+        --chassis-deep: #0b2321;
+        --log: #17403c;
+        --ink: #f3e7c6;
+        --tide: #46b3a4;
+        --sig-blue: #6fb2e8;
+        --sig-red: #ff6b62;
+        --sig-yellow: #ffc400;
+        --rule: rgba(243, 231, 198, 0.24);
+        --on-chassis: #f3e7c6;
+        --on-deep: #f7ecd0;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--chassis);
+        color: var(--on-chassis);
+        font-family: "Atkinson Hyperlegible", sans-serif;
+        font-size: 15px;
+        line-height: 1.5;
+      }
+      .plate {
+        font-family: "Big Shoulders Display", sans-serif;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        line-height: 0.9;
+      }
+      .mono {
+        font-family: "Martian Mono", monospace;
+        font-size: 0.78em;
+        font-variant-numeric: tabular-nums;
+      }
+
+      header {
+        height: 104px;
+        display: grid;
+        grid-template-columns: 300px 1fr auto;
+        align-items: center;
+        gap: 28px;
+        padding: 0 26px;
+        background: var(--chassis-deep);
+        color: var(--on-deep);
+        border-bottom: 5px solid var(--ink);
+      }
+      .wordmark {
+        font-size: 46px;
+      }
+      .wordmark span {
+        color: var(--sig-yellow);
+      }
+      nav {
+        display: flex;
+        gap: 5px;
+      }
+      nav a {
+        padding: 11px 20px 9px;
+        font-family: "Big Shoulders Display", sans-serif;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.11em;
+        font-size: 19px;
+        color: var(--on-deep);
+        text-decoration: none;
+        background: rgba(255, 238, 194, 0.1);
+      }
+      nav a.on {
+        background: var(--on-deep);
+        color: var(--chassis-deep);
+      }
+      .watch {
+        text-align: right;
+      }
+      .watch .t {
+        font-size: 30px;
+      }
+      .watch .who {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        opacity: 0.85;
+      }
+
+      .body {
+        display: grid;
+        grid-template-columns: 1fr 300px;
+        align-items: start;
+      }
+      main {
+        padding: 0 26px 26px;
+      }
+      aside {
+        padding: 22px 22px 26px;
+        background: var(--chassis-deep);
+        color: var(--on-deep);
+        min-height: calc(100vh - 162px);
+      }
+      aside h4 {
+        margin: 0 0 10px;
+        font-size: 11px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        opacity: 0.85;
+      }
+      aside + aside {
+        margin-top: 0;
+      }
+
+      .rail {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        padding: 20px 0 8px;
+        border-bottom: 5px solid var(--ink);
+      }
+      .rail h2 {
+        margin: 0;
+        font-size: 27px;
+      }
+      .rail .count {
+        font-size: 12px;
+      }
+
+      .bay {
+        background: var(--panel);
+        color: var(--ink);
+        border: 3px solid var(--ink);
+        margin: 16px 0 26px;
+      }
+      .bay .hd {
+        display: grid;
+        grid-template-columns: 68px 1fr auto;
+        gap: 18px;
+        align-items: center;
+        padding: 16px 22px;
+        background: var(--chassis-deep);
+        color: var(--on-deep);
+      }
+      .bay h3 {
+        margin: 0;
+        font-size: 30px;
+      }
+      .bay .hd .meta {
+        text-align: right;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+      }
+      .flag {
+        width: 60px;
+        height: 40px;
+        display: block;
+        outline: 2px solid rgba(0, 0, 0, 0.35);
+      }
+      .flag-name {
+        display: block;
+        margin-top: 4px;
+        font-size: 9px;
+        letter-spacing: 0.16em;
+        text-align: center;
+        opacity: 0.85;
+      }
+
+      .timerail {
+        padding: 26px 24px 0;
+      }
+      .railline {
+        height: 3px;
+        background: var(--ink);
+        margin: 0 -24px;
+      }
+      .above,
+      .below {
+        display: flex;
+        gap: 12px;
+      }
+      .above {
+        align-items: flex-end;
+        min-height: 96px;
+      }
+      .below {
+        align-items: flex-start;
+      }
+      .utt {
+        border: 2px solid var(--ink);
+        padding: 7px 10px;
+        font-size: 14px;
+        background: transparent;
+        max-width: 360px;
+      }
+      .above .utt {
+        border-bottom-width: 5px;
+        color: var(--sig-blue);
+        border-color: var(--sig-blue);
+      }
+      .below .utt {
+        border-top-width: 5px;
+      }
+      .utt .at {
+        display: block;
+        font-size: 10px;
+        opacity: 0.6;
+      }
+      .utt.auth {
+        border-color: var(--sig-red);
+        color: var(--sig-red);
+        font-weight: 700;
+      }
+
+      /* The tie is the point of the whole screen. It runs from the words that gave permission down
+         into the action they permitted, so the two can never be read as two separate events. */
+      .tied {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .tied .stem {
+        width: 5px;
+        height: 34px;
+        background: var(--sig-red);
+        margin-left: 30px;
+      }
+      .tied .foot {
+        height: 5px;
+        width: 240px;
+        background: var(--sig-red);
+      }
+
+      .docket {
+        border-top: 3px solid var(--ink);
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+      }
+      .docket div {
+        padding: 13px 16px;
+        border-left: 2px solid var(--rule);
+      }
+      .docket div:first-child {
+        border-left: 0;
+      }
+      .docket dt {
+        font-size: 10px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0.7;
+      }
+      .docket dd {
+        margin: 5px 0 0;
+        font-size: 15px;
+        font-weight: 700;
+      }
+      .docket .ok {
+        color: var(--tide);
+      }
+      .docket .said {
+        color: var(--sig-red);
+      }
+
+      .slat {
+        display: grid;
+        grid-template-columns: 64px 1fr 190px 180px 130px;
+        align-items: center;
+        gap: 18px;
+        padding: 13px 0;
+        border-bottom: 2px solid var(--rule);
+      }
+      .slat .svc {
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .slat .svc .why {
+        display: block;
+        font-size: 13px;
+        font-weight: 400;
+        opacity: 0.82;
+      }
+      .slat .means {
+        font-style: italic;
+        font-size: 13px;
+      }
+      .slat .st {
+        font-size: 11px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      footer {
+        height: 56px;
+        background: var(--chassis-deep);
+        display: flex;
+        align-items: center;
+        padding: 0 26px;
+      }
+      footer .tick {
+        flex: 1;
+        height: 20px;
+        border-right: 1px solid rgba(255, 238, 194, 0.22);
+        position: relative;
+      }
+      footer .tick i {
+        position: absolute;
+        bottom: 0;
+        width: 4px;
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="wordmark plate">Ring<span>bolt</span></div>
+      <nav>
+        <a class="on" href="#">Watch</a><a href="#">Incidents</a
+        ><a href="#">Lines</a><a href="#">Authority</a>
+      </nav>
+      <div class="watch">
+        <div class="t plate">03:14</div>
+        <div class="who mono">
+          line open &middot; yigal &middot; +31 6 ** ** 41 82
+        </div>
+      </div>
+    </header>
+
+    <div class="body">
+      <main>
+        <div class="rail">
+          <h2 class="plate">On the telephone</h2>
+          <span class="count mono">1</span>
+        </div>
+
+        <section class="bay">
+          <div class="hd">
+            <div>
+              <svg class="flag" viewBox="0 0 60 40" aria-label="Victor">
+                <rect width="60" height="40" fill="#fff" />
+                <path
+                  d="M0 0 L60 40 M60 0 L0 40"
+                  stroke="#c8202a"
+                  stroke-width="11"
+                />
+              </svg>
+              <span class="flag-name mono">VICTOR</span>
+            </div>
+            <h3 class="plate">checkout</h3>
+            <div class="meta mono">
+              i require assistance<br />payment errors above 20 percent<br />ringing
+              41s &middot; call_9f2c1
+            </div>
+          </div>
+
+          <div class="timerail">
+            <div class="above">
+              <div class="utt">
+                <span class="at mono">00:04</span>Payment errors went from
+                nought point two to twenty three percent at two minutes past
+                two, right after a deploy.
+              </div>
+              <div class="utt">
+                <span class="at mono">00:13</span>No. Search and accounts are
+                both clean.
+              </div>
+            </div>
+            <div class="railline"></div>
+            <div class="below">
+              <div class="utt" style="margin-left: 30%">
+                <span class="at mono">00:11</span>Is anything else touching
+                payments?
+              </div>
+              <div class="tied">
+                <div class="utt auth">
+                  <span class="at mono">00:19</span>Roll it back.
+                </div>
+                <div class="stem"></div>
+                <div class="foot"></div>
+              </div>
+            </div>
+          </div>
+
+          <dl class="docket">
+            <div>
+              <dt>Proposed</dt>
+              <dd>rollback</dd>
+            </div>
+            <div>
+              <dt>Spoken authority</dt>
+              <dd class="said">"roll it back"</dd>
+            </div>
+            <div>
+              <dt>Confidence</dt>
+              <dd class="mono">0.94 high</dd>
+            </div>
+            <div>
+              <dt>Stages</dt>
+              <dd class="mono">4 of 4</dd>
+            </div>
+            <div>
+              <dt>Result</dt>
+              <dd class="ok">2026.08.19-b restored</dd>
+            </div>
+          </dl>
+        </section>
+
+        <div class="rail">
+          <h2 class="plate">Standing</h2>
+          <span class="count mono">3</span>
+        </div>
+
+        <div class="slat">
+          <div>
+            <svg class="flag" viewBox="0 0 60 40" aria-label="Uniform">
+              <rect width="30" height="20" fill="#c8202a" />
+              <rect x="30" width="30" height="20" fill="#fff" />
+              <rect y="20" width="30" height="20" fill="#fff" />
+              <rect x="30" y="20" width="30" height="20" fill="#c8202a" />
+            </svg>
+            <span class="flag-name mono">UNIFORM</span>
+          </div>
+          <div class="svc">
+            search<span class="why">Latency above 5 seconds, p99</span>
+          </div>
+          <div class="means">You are running into danger</div>
+          <div class="st mono">Calling Yigal in 40s</div>
+          <div class="st mono">2 offered</div>
+        </div>
+
+        <div class="slat">
+          <div>
+            <svg class="flag" viewBox="0 0 60 40" aria-label="Kilo">
+              <rect width="30" height="40" fill="#ffc400" />
+              <rect x="30" width="30" height="40" fill="#14568c" />
+            </svg>
+            <span class="flag-name mono">KILO</span>
+          </div>
+          <div class="svc">
+            mailer<span class="why">Queue depth 12,400 and climbing</span>
+          </div>
+          <div class="means">I wish to communicate with you</div>
+          <div class="st mono">No answer, next Taraneh</div>
+          <div class="st mono">Escalating</div>
+        </div>
+
+        <div class="slat">
+          <div>
+            <svg class="flag" viewBox="0 0 60 40" aria-label="Mike">
+              <rect width="60" height="40" fill="#14568c" />
+              <rect x="17" y="9" width="26" height="22" fill="#fff" />
+            </svg>
+            <span class="flag-name mono">MIKE</span>
+          </div>
+          <div class="svc">
+            imports<span class="why">Nightly job failed twice</span>
+          </div>
+          <div class="means">Stopped and making no way</div>
+          <div class="st mono">Held by Yigal, 01:52</div>
+          <div class="st mono">Kill switch on</div>
+        </div>
+      </main>
+
+      <aside>
+        <h4>Code of signals</h4>
+        <p
+          style="font-size: 12px; line-height: 1.6; opacity: 0.9; margin-top: 0"
+        >
+          Every state on this board is a real single-letter signal. The flag is
+          the state, and its meaning at sea is its meaning here.
+        </p>
+        <h4 style="margin-top: 22px">Evidence, checkout</h4>
+        <p class="mono" style="font-size: 10px; line-height: 1.9">
+          14:02:11 deploy 2026.08.19-c<br />14:03:40 5xx 0.2% -&gt; 23%<br />14:04:02
+          alert raised<br />14:04:09 call placed<br />14:04:50 authority
+          given<br />14:04:53 rollback ran
+        </p>
+        <h4 style="margin-top: 22px">Call allowance</h4>
+        <p class="mono" style="font-size: 12px">3 of 20 spent</p>
+      </aside>
+    </div>
+
+    <footer>
+      <div class="tick">
+        <i style="background: var(--sig-blue); left: 20%"></i>
+      </div>
+      <div class="tick">
+        <i style="background: var(--sig-yellow); left: 60%"></i>
+      </div>
+      <div class="tick">
+        <i style="background: var(--sig-red); left: 10%"></i
+        ><i style="background: var(--sig-red); left: 70%"></i>
+      </div>
+      <div class="tick">
+        <i style="background: var(--sig-blue); left: 35%"></i>
+      </div>
+      <div class="tick"></div>
+      <div class="tick">
+        <i style="background: var(--sig-red); left: 80%"></i>
+      </div>
+    </footer>
+  </body>
+</html>
