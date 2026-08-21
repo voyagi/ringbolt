@@ -3,9 +3,11 @@ import {
   InvalidTransitionError,
   alertPayload,
   canTransition,
+  describeForSpeech,
   fingerprintFor,
   incidentStates,
   isTerminal,
+  openIncidentStates,
   transition,
 } from "./incident.js";
 
@@ -48,6 +50,58 @@ describe("incident state machine", () => {
 
   it("allows escalation back into another call", () => {
     expect(canTransition("escalating", "calling")).toBe(true);
+  });
+
+  it("lets a snooze lead back to another call", () => {
+    expect(canTransition("deciding", "snoozed")).toBe(true);
+    expect(canTransition("snoozed", "calling")).toBe(true);
+  });
+
+  /**
+   * A state that is open to the duplicate check but not to the database index, or the other way
+   * round, is a second phone call nobody asked for. This is the pairing that keeps the two honest.
+   */
+  it("counts every non-terminal state as open", () => {
+    expect([...openIncidentStates].sort()).toEqual(
+      incidentStates.filter((state) => !isTerminal(state)).sort(),
+    );
+  });
+});
+
+describe("describeForSpeech", () => {
+  const incident = {
+    service: "checkout",
+    title: "Payment errors above 20 percent",
+    severity: "critical" as const,
+    detail: null,
+    startedAt: "2026-08-21T14:00:00.000Z",
+  };
+
+  it("says how long the problem has been running rather than a timestamp", () => {
+    const spoken = describeForSpeech(
+      incident,
+      new Date("2026-08-21T14:18:00.000Z"),
+    );
+    expect(spoken).toContain("Started 18 minutes ago.");
+    expect(spoken).not.toContain("2026-08-21T14:00:00.000Z");
+  });
+
+  it("rounds a long-running problem to hours", () => {
+    expect(
+      describeForSpeech(incident, new Date("2026-08-21T17:00:00.000Z")),
+    ).toContain("Started 3 hours ago.");
+  });
+
+  it("says nothing about timing when the monitor sent none", () => {
+    expect(
+      describeForSpeech({ ...incident, startedAt: null }, new Date()),
+    ).not.toContain("Started");
+  });
+
+  it("does not report a negative age when the sender's clock runs fast", () => {
+    expect(
+      describeForSpeech(incident, new Date("2026-08-21T13:50:00.000Z")),
+    ).toContain("Started just now.");
   });
 });
 

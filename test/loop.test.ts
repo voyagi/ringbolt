@@ -154,6 +154,92 @@ describe("the whole loop", () => {
     expect(runs?.n).toBe(0);
   });
 
+  /**
+   * The failure that ran end to end before this branch. One timeout reading the call back used to
+   * be enough: the event id was spent on the way in, so the provider's retry of the same id, which
+   * is the only recovery this design has, was answered "duplicate" and did nothing. The responder's
+   * decision was gone and the incident sat in `calling` for ever, which then made every later
+   * repeat of that alert a duplicate of a call that never finished.
+   */
+  it("does not spend the event id on a delivery it could not process", async () => {
+    const response = await postAlert({
+      service: "checkout",
+      title: "Payment errors above 20 percent",
+    });
+    const accepted = (await response.json()) as { incident: string };
+    const call = await terminalCallFor(accepted.incident);
+
+    const eventId = "evt_retried_after_a_failure";
+    const lost = await SELF.fetch("https://ringbolt.test/webhooks/calle", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "CALL-E-Event-Id": eventId,
+      },
+      body: JSON.stringify({
+        id: eventId,
+        type: "call.completed",
+        created_at: new Date().toISOString(),
+        data: { id: "call_the_api_cannot_read", status: "completed" },
+      }),
+    });
+    expect(lost.status).toBe(500);
+
+    const retry = await deliverWebhook(call, eventId);
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toMatchObject({ ok: true });
+
+    const repo = new Repo(env.DB);
+    expect((await repo.getIncident(accepted.incident))?.state).toBe("resolved");
+  });
+
+  /**
+   * CALL-E documents the event id as a required header. The body is the half an anonymous caller
+   * writes, and this endpoint cannot be authenticated, so a delivery with no header is refused
+   * rather than trusted on the body alone.
+   */
+  it("refuses a delivery with no event id header and writes nothing", async () => {
+    const response = await SELF.fetch("https://ringbolt.test/webhooks/calle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "evt_caller_chosen", type: "call.completed" }),
+    });
+
+    expect(response.status).toBe(400);
+    const rows = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM processed_events`,
+    ).first<{ n: number }>();
+    expect(rows?.n).toBe(0);
+  });
+
+  /**
+   * The deploy guide recommends sending a stable fingerprint with per-host titles, which is exactly
+   * the shape that used to split one incident across two Durable Objects, each writing to a record
+   * the other owned.
+   */
+  it("collapses repeats that share a fingerprint but not a title", async () => {
+    const first = await postAlert({
+      service: "checkout",
+      title: "host-1 cpu",
+      fingerprint: "checkout-cpu",
+    });
+    const second = await postAlert({
+      service: "checkout",
+      title: "host-2 cpu",
+      fingerprint: "checkout-cpu",
+    });
+
+    const firstBody = (await first.json()) as { incident: string };
+    const secondBody = (await second.json()) as {
+      incident: string;
+      duplicate: boolean;
+    };
+
+    expect(secondBody.duplicate).toBe(true);
+    expect(secondBody.incident).toBe(firstBody.incident);
+    expect(await new Repo(env.DB).listIncidents()).toHaveLength(1);
+  });
+
   it("collapses a repeat of the same alert into the open incident", async () => {
     const first = await postAlert({
       service: "checkout",
@@ -190,12 +276,21 @@ describe("the whole loop", () => {
     expect(response.status).toBe(404);
   });
 
-  it("reports a real-call budget that the fake never spends", async () => {
-    await postAlert({ service: "checkout", title: "down" });
-    const budget = await SELF.fetch("https://ringbolt.test/api/budget");
-    expect(await budget.json()).toMatchObject({
-      realCallsPlaced: 0,
-      remaining: 20,
+  it("stores what the monitor sent about when the problem began", async () => {
+    const response = await postAlert({
+      service: "checkout",
+      title: "Payment errors above 20 percent",
+      startedAt: "2026-08-21T14:02:00.000Z",
+      links: [
+        { label: "dashboard", url: "https://status.example.com/checkout" },
+      ],
     });
+    const accepted = (await response.json()) as { incident: string };
+
+    const incident = await new Repo(env.DB).getIncident(accepted.incident);
+    expect(incident?.startedAt).toBe("2026-08-21T14:02:00.000Z");
+    expect(incident?.links).toEqual([
+      { label: "dashboard", url: "https://status.example.com/checkout" },
+    ]);
   });
 });

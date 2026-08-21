@@ -8,10 +8,26 @@ export const incidentStates = [
   "resolved",
   "held",
   "escalating",
+  "snoozed",
   "failed",
 ] as const;
 
 export type IncidentState = (typeof incidentStates)[number];
+
+/**
+ * An incident counts as open while it can still lead to a call. Two things read this: the duplicate
+ * check that decides whether a repeat alert rings a phone, and the unique index in migration 0002
+ * that enforces one open incident per fingerprint. Change it here and change it there in the same
+ * commit, because a state that is open to one and not the other is a silent second phone call.
+ */
+export const openIncidentStates = [
+  "received",
+  "calling",
+  "deciding",
+  "acting",
+  "escalating",
+  "snoozed",
+] as const satisfies readonly IncidentState[];
 
 export const severities = ["critical", "high", "low"] as const;
 export type Severity = (typeof severities)[number];
@@ -41,6 +57,8 @@ export type OfferedAction = {
   confirmationPhrase?: string;
 };
 
+export type IncidentLink = { label: string; url: string };
+
 export type Incident = {
   id: string;
   state: IncidentState;
@@ -50,6 +68,9 @@ export type Incident = {
   detail: string | null;
   fingerprint: string;
   source: string | null;
+  /** When the monitor says the problem began, which is what the responder asks about first. */
+  startedAt: string | null;
+  links: IncidentLink[];
   createdAt: string;
   updatedAt: string;
   callId: string | null;
@@ -61,9 +82,10 @@ const allowedTransitions: Readonly<
 > = {
   received: ["calling", "failed"],
   calling: ["deciding", "escalating", "failed"],
-  deciding: ["acting", "held", "escalating", "failed"],
+  deciding: ["acting", "held", "escalating", "snoozed", "failed"],
   acting: ["resolved", "failed"],
   escalating: ["calling", "failed"],
+  snoozed: ["calling", "failed"],
   resolved: [],
   held: [],
   failed: [],
@@ -100,20 +122,53 @@ export function isTerminal(state: IncidentState): boolean {
  * becomes another phone call at 3am. Service plus title is the coarsest grouping that is never
  * wrong in the dangerous direction: it can merge two genuinely different problems that share a
  * title, which costs a missed call on the second, where the alternative costs a call per repeat.
+ *
+ * The two parts go in as a JSON array rather than joined by a separator, because a separator can
+ * appear inside either half: service "a" with title "b::c" and service "a::b" with title "c" would
+ * otherwise be the same incident. This value also addresses the Durable Object that owns the
+ * incident, so an ambiguous join would put two different problems in one owner.
  */
 export function fingerprintFor(alert: AlertPayload): string {
-  return alert.fingerprint ?? `${alert.service}::${alert.title}`;
+  return (
+    alert.fingerprint ??
+    `service+title:${JSON.stringify([alert.service, alert.title])}`
+  );
 }
 
 export function describeForSpeech(
-  incident: Pick<Incident, "service" | "title" | "severity" | "detail">,
+  incident: Pick<
+    Incident,
+    "service" | "title" | "severity" | "detail" | "startedAt"
+  >,
+  now: Date,
 ): string {
   const lines = [
     `Service: ${incident.service}.`,
     `Problem: ${incident.title}.`,
     `Severity: ${incident.severity}.`,
   ];
+  const running = describeElapsed(incident.startedAt, now);
+  if (running !== null) lines.push(`Started ${running}.`);
   if (incident.detail !== null && incident.detail.trim() !== "")
     lines.push(`Detail: ${incident.detail}`);
   return lines.join(" ");
+}
+
+/**
+ * A timestamp read out loud is useless to somebody who has just woken up, so it goes over the
+ * telephone as a duration. A clock skew that puts the start in the future is reported as just now
+ * rather than as a negative age.
+ */
+function describeElapsed(startedAt: string | null, now: Date): string | null {
+  if (startedAt === null) return null;
+  const started = Date.parse(startedAt);
+  if (Number.isNaN(started)) return null;
+
+  const minutes = Math.round((now.getTime() - started) / 60_000);
+  if (minutes <= 0) return "just now";
+  if (minutes === 1) return "1 minute ago";
+  if (minutes < 90) return `${minutes} minutes ago`;
+
+  const hours = Math.round(minutes / 60);
+  return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
 }

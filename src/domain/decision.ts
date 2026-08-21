@@ -62,24 +62,39 @@ export type SpokenDecision = z.infer<typeof spokenDecision>;
 
 export const CONFIDENCE_FLOOR = 0.7;
 
-export type AuthorizationInput = {
+/** Enough of an action for the gate to decide on it: what it is called and what must be said. */
+export type OfferedActionLike = {
+  id: string;
+  confirmationPhrase?: string;
+};
+
+export type AuthorizationInput<TAction extends OfferedActionLike> = {
   callStatus: string;
   taskCompleted: boolean | null;
   confidenceScore: number | null;
   structuredResult: unknown;
-  offeredActionIds: readonly string[];
-  /** Actions that may not run on a decision alone, mapped to the phrase the responder must say. */
-  confirmationPhrases: Readonly<Record<string, string>>;
+  /**
+   * The actions that were read out on this call. Authorization returns the matching member of this
+   * array rather than an id, so the set that permits an action and the set that supplies the one
+   * that runs are the same objects. A separate lookup afterwards is how a per-service policy grows
+   * a hole: the check narrows and the lookup does not.
+   */
+  offered: readonly TAction[];
 };
 
-export type Authorization =
-  | { authorized: true; decision: SpokenDecision; actionId: string }
+export type Authorization<TAction extends OfferedActionLike> =
+  | { authorized: true; decision: SpokenDecision; action: TAction }
   | {
       authorized: false;
       refusal: RefusalReason;
       detail: string;
       decision?: SpokenDecision;
     };
+
+export type Refusal<TAction extends OfferedActionLike> = Extract<
+  Authorization<TAction>,
+  { authorized: false }
+>;
 
 export type RefusalReason =
   | "call_not_completed"
@@ -96,7 +111,9 @@ export type RefusalReason =
  * fundamental checks run first so the detail message names the earliest thing that was wrong,
  * which is the one worth showing a human.
  */
-export function authorize(input: AuthorizationInput): Authorization {
+export function authorize<TAction extends OfferedActionLike>(
+  input: AuthorizationInput<TAction>,
+): Authorization<TAction> {
   if (input.callStatus !== "completed") {
     return {
       authorized: false,
@@ -113,12 +130,20 @@ export function authorize(input: AuthorizationInput): Authorization {
     };
   }
 
+  // NaN and Infinity both fail every comparison, so a bare `score < FLOOR` lets them through into
+  // the one branch whose whole job is to stop a guess. The range check is here for the same reason:
+  // a number outside 0..1 did not come from the field this floor is about.
   const score = input.confidenceScore;
-  if (score === null || score < CONFIDENCE_FLOOR) {
+  if (
+    score === null ||
+    !Number.isFinite(score) ||
+    score < CONFIDENCE_FLOOR ||
+    score > 1
+  ) {
     return {
       authorized: false,
       refusal: "confidence_below_floor",
-      detail: `confidence ${score ?? "unknown"} is below the floor of ${CONFIDENCE_FLOOR}`,
+      detail: `confidence ${score ?? "unknown"} is not a number at or above the floor of ${CONFIDENCE_FLOOR}`,
     };
   }
 
@@ -144,7 +169,8 @@ export function authorize(input: AuthorizationInput): Authorization {
   }
 
   const actionId = decision.action_id;
-  if (actionId === undefined || !input.offeredActionIds.includes(actionId)) {
+  const action = input.offered.find((candidate) => candidate.id === actionId);
+  if (actionId === undefined || action === undefined) {
     return {
       authorized: false,
       refusal: "action_not_offered",
@@ -153,7 +179,7 @@ export function authorize(input: AuthorizationInput): Authorization {
     };
   }
 
-  const requiredPhrase = input.confirmationPhrases[actionId];
+  const requiredPhrase = action.confirmationPhrase;
   if (requiredPhrase !== undefined) {
     const spoken = decision.confirmation_phrase;
     if (spoken === undefined || spoken.trim() === "") {
@@ -174,7 +200,7 @@ export function authorize(input: AuthorizationInput): Authorization {
     }
   }
 
-  return { authorized: true, decision, actionId };
+  return { authorized: true, decision, action };
 }
 
 /**

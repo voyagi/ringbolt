@@ -25,6 +25,10 @@
       "database_id": "local-development-placeholder"
     }
   ],
+  // The reconciliation sweep. A CALL-E webhook that never lands would otherwise leave an incident
+  // waiting on its call for ever, and an incident that is still open answers every later repeat of
+  // that alert as a duplicate, so one lost delivery would quietly retire a service's alerts.
+  "triggers": { "crons": ["* * * * *"] },
   "observability": { "enabled": true },
   "vars": {
     "RINGBOLT_ENV": "development",

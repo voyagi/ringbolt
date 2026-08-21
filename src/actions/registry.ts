@@ -84,23 +84,11 @@ const rollback: RunbookAction = {
 
 const actions: readonly RunbookAction[] = [killSwitch, rollback];
 
+/**
+ * The only way into this list. Phase 3 replaces the body with per-service policy, and because the
+ * authorization gate takes the actions this returns rather than looking an id up in the module
+ * again, narrowing it here narrows what can run.
+ */
 export function actionsFor(_service: string): readonly RunbookAction[] {
-  // Phase 3 replaces this with per-service policy. Until then every service is offered the same
-  // two, which is honest: the policy layer does not exist yet rather than existing and being empty.
   return actions;
-}
-
-export function findAction(id: string): RunbookAction | undefined {
-  return actions.find((action) => action.id === id);
-}
-
-export function confirmationPhrasesFor(
-  available: readonly RunbookAction[],
-): Record<string, string> {
-  const phrases: Record<string, string> = {};
-  for (const action of available) {
-    if (action.confirmationPhrase !== undefined)
-      phrases[action.id] = action.confirmationPhrase;
-  }
-  return phrases;
 }

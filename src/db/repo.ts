@@ -1,4 +1,12 @@
-import type { Incident, IncidentState, Severity } from "../domain/incident.js";
+import type {
+  Incident,
+  IncidentLink,
+  IncidentState,
+  Severity,
+} from "../domain/incident.js";
+import { openIncidentStates } from "../domain/incident.js";
+
+const OPEN_STATES = openIncidentStates.map((state) => `'${state}'`).join(", ");
 
 export type IncidentEvent = {
   id: string;
@@ -38,11 +46,32 @@ type IncidentRow = {
   detail: string | null;
   fingerprint: string;
   source: string | null;
+  started_at: string | null;
+  links: string | null;
   call_id: string | null;
   outcome: string | null;
   created_at: string;
   updated_at: string;
 };
+
+/**
+ * The unique index on open fingerprints rejecting a second open incident. That is a race being
+ * caught rather than a fault, so the caller turns it into the duplicate answer the winning writer
+ * would have given, instead of a five hundred and a retry.
+ */
+export function isDuplicateOpenIncident(error: unknown): boolean {
+  const messages: string[] = [];
+  for (let cause: unknown = error, depth = 0; depth < 4; depth += 1) {
+    if (!(cause instanceof Error)) break;
+    messages.push(cause.message);
+    cause = cause.cause;
+  }
+  return messages.some(
+    (message) =>
+      /unique constraint failed/i.test(message) &&
+      /incidents\.fingerprint/i.test(message),
+  );
+}
 
 export class Repo {
   constructor(private readonly db: D1Database) {}
@@ -50,8 +79,8 @@ export class Repo {
   async createIncident(incident: Incident): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO incidents (id, state, service, title, severity, detail, fingerprint, source, call_id, outcome, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`,
+        `INSERT INTO incidents (id, state, service, title, severity, detail, fingerprint, source, started_at, links, call_id, outcome, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)`,
       )
       .bind(
         incident.id,
@@ -62,6 +91,8 @@ export class Repo {
         incident.detail,
         incident.fingerprint,
         incident.source,
+        incident.startedAt,
+        incident.links.length === 0 ? null : JSON.stringify(incident.links),
         incident.callId,
         incident.outcome,
         incident.createdAt,
@@ -94,7 +125,7 @@ export class Repo {
     const row = await this.db
       .prepare(
         `SELECT * FROM incidents
-         WHERE fingerprint = ?1 AND state IN ('received', 'calling', 'deciding', 'acting', 'escalating')
+         WHERE fingerprint = ?1 AND state IN (${OPEN_STATES})
          ORDER BY created_at DESC LIMIT 1`,
       )
       .bind(fingerprint)
@@ -102,24 +133,51 @@ export class Repo {
     return row === null ? null : toIncident(row);
   }
 
+  /** Incidents whose call has not reported back, oldest first, for the reconciliation sweep. */
+  async findCallsWaitingSince(
+    updatedBefore: string,
+    limit: number,
+  ): Promise<Incident[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT * FROM incidents
+         WHERE state = 'calling' AND updated_at < ?1
+         ORDER BY updated_at ASC LIMIT ?2`,
+      )
+      .bind(updatedBefore, limit)
+      .all<IncidentRow>();
+    return results.map(toIncident);
+  }
+
+  /**
+   * The SET clause is built from the keys the patch actually carries, so clearing a column and
+   * omitting it are different requests. COALESCE cannot tell them apart: it reads an intentional
+   * null as "leave this alone", which makes a clear report success and write nothing.
+   */
   async updateIncident(
     id: string,
     patch: Partial<Pick<Incident, "state" | "callId" | "outcome">>,
     at: string,
   ): Promise<void> {
+    const columns: Record<keyof typeof patch, string> = {
+      state: "state",
+      callId: "call_id",
+      outcome: "outcome",
+    };
+
+    const assignments: string[] = [];
+    const values: (string | null)[] = [];
+    for (const key of Object.keys(columns) as (keyof typeof columns)[]) {
+      if (!(key in patch)) continue;
+      assignments.push(`${columns[key]} = ?`);
+      values.push(patch[key] ?? null);
+    }
+    assignments.push(`updated_at = ?`);
+    values.push(at);
+
     await this.db
-      .prepare(
-        `UPDATE incidents
-         SET state = COALESCE(?2, state), call_id = COALESCE(?3, call_id), outcome = COALESCE(?4, outcome), updated_at = ?5
-         WHERE id = ?1`,
-      )
-      .bind(
-        id,
-        patch.state ?? null,
-        patch.callId ?? null,
-        patch.outcome ?? null,
-        at,
-      )
+      .prepare(`UPDATE incidents SET ${assignments.join(", ")} WHERE id = ?`)
+      .bind(...values, id)
       .run();
   }
 
@@ -226,17 +284,59 @@ export class Repo {
   }
 
   /**
-   * Returns false when this event has been seen before. The insert itself is the lock, so two
-   * concurrent deliveries of the same event cannot both win.
+   * Takes ownership of a webhook event id, returning false when somebody else already has it.
+   *
+   * The claim is deliberately not the whole story: it marks the id in flight, and completeEvent
+   * closes it once the responder's decision has actually been carried out. A delivery that fails
+   * releases the claim on its way out, and one whose isolate died leaves an in-flight row that this
+   * statement takes over once it is older than staleBefore. Burning the id up front is what turned
+   * a single provider timeout into a decision that could never be delivered again, because the
+   * provider's retry is the only recovery this design has.
+   *
+   * The whole thing is one statement so two concurrent deliveries of the same id cannot both win.
    */
-  async claimEvent(eventId: string, at: string): Promise<boolean> {
+  async claimEvent(
+    eventId: string,
+    at: string,
+    staleBefore: string,
+  ): Promise<boolean> {
     const result = await this.db
       .prepare(
-        `INSERT OR IGNORE INTO processed_events (event_id, received_at) VALUES (?1, ?2)`,
+        `INSERT INTO processed_events (event_id, received_at, status, completed_at)
+         VALUES (?1, ?2, 'in_flight', NULL)
+         ON CONFLICT (event_id) DO UPDATE SET received_at = ?2
+         WHERE processed_events.status = 'in_flight' AND processed_events.received_at < ?3`,
+      )
+      .bind(eventId, at, staleBefore)
+      .run();
+    return (result.meta.changes ?? 0) > 0;
+  }
+
+  async completeEvent(eventId: string, at: string): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE processed_events SET status = 'done', completed_at = ?2 WHERE event_id = ?1`,
       )
       .bind(eventId, at)
       .run();
-    return (result.meta.changes ?? 0) > 0;
+  }
+
+  async releaseEvent(eventId: string): Promise<void> {
+    await this.db
+      .prepare(
+        `DELETE FROM processed_events WHERE event_id = ?1 AND status = 'in_flight'`,
+      )
+      .bind(eventId)
+      .run();
+  }
+
+  /** Nothing else removes rows from this table, and an unauthenticated endpoint writes to it. */
+  async pruneProcessedEvents(receivedBefore: string): Promise<number> {
+    const result = await this.db
+      .prepare(`DELETE FROM processed_events WHERE received_at < ?1`)
+      .bind(receivedBefore)
+      .run();
+    return result.meta.changes ?? 0;
   }
 
   async recordRealCall(
@@ -271,6 +371,8 @@ function toIncident(row: IncidentRow): Incident {
     detail: row.detail,
     fingerprint: row.fingerprint,
     source: row.source,
+    startedAt: row.started_at,
+    links: row.links === null ? [] : (JSON.parse(row.links) as IncidentLink[]),
     callId: row.call_id,
     outcome: row.outcome,
     createdAt: row.created_at,
