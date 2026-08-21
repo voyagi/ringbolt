@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { CallBudgetExhaustedError, LiveCallPlacer } from "../src/calle/live.js";
+import {
+  CallBudgetExhaustedError,
+  LiveCallPlacer,
+  NumberNotAllowedError,
+} from "../src/calle/live.js";
 import { REAL_CALL_ALLOWANCE } from "../src/calle/port.js";
 import { verifyCall } from "../src/calle/verify.js";
 import { decisionResultSchema } from "../src/domain/decision.js";
@@ -11,16 +15,19 @@ import {
 } from "./support/calle-api.js";
 
 const API_KEY = "test-key-not-a-real-credential";
+const OWNED_NUMBER = "+31612345678";
 
 function placerWith(
   api: CalleApiStub,
   spent = 0,
+  allowedNumbers: string[] = [OWNED_NUMBER],
 ): { placer: LiveCallPlacer; api: CalleApiStub } {
   return {
     api,
     placer: new LiveCallPlacer({
       apiKey: API_KEY,
       budget: { spent: async () => spent },
+      allowedNumbers,
       baseUrl: "https://calle.invalid",
       fetchImpl: api.fetch,
     }),
@@ -29,7 +36,7 @@ function placerWith(
 
 function anIncidentCall() {
   return {
-    phone: "+31612345678",
+    phone: OWNED_NUMBER,
     task: "Checkout is returning errors. Ask what to do.",
     resultSchema: decisionResultSchema as unknown as Record<string, unknown>,
     metadata: { incident_id: "inc_live_1", service: "checkout" },
@@ -224,6 +231,55 @@ describe("what the adapter reads back", () => {
     await expect(verifyCall(placer, placed.id)).rejects.toThrow(
       /unexpected shape/,
     );
+  });
+});
+
+/**
+ * A rotation can name any contact anybody added through the configuration endpoint, so without this
+ * list the set of telephones a live build can reach is a database table. What it protects against
+ * is a real stranger's phone ringing at three in the morning, paid for out of an allowance of
+ * twenty calls that cannot be topped up.
+ */
+describe("the numbers this build may call", () => {
+  it("refuses a number that is not on the list, and sends nothing", async () => {
+    const api = calleApiStub();
+    const { placer } = placerWith(api);
+
+    await expect(
+      placer.place({ ...anIncidentCall(), phone: "+31699999999" }),
+    ).rejects.toThrow(NumberNotAllowedError);
+    expect(api.creates).toHaveLength(0);
+  });
+
+  /** A refusal reaches an audit record and an HTTP response, and the number is still personal data. */
+  it("does not repeat the number it refused", async () => {
+    const { placer } = placerWith(calleApiStub());
+
+    await expect(
+      placer.place({ ...anIncidentCall(), phone: "+31699999999" }),
+    ).rejects.toThrow(/^(?!.*\+31699999999).*$/s);
+  });
+
+  it("places a call to a second number once that number is on the list", async () => {
+    const api = calleApiStub();
+    const { placer } = placerWith(api, 0, [OWNED_NUMBER, "+31698765432"]);
+
+    await expect(
+      placer.place({ ...anIncidentCall(), phone: "+31698765432" }),
+    ).resolves.toMatchObject({ status: "queued" });
+  });
+
+  /**
+   * The number is checked before the allowance, so a build with nothing left to spend still says
+   * the more important of the two things when both are wrong.
+   */
+  it("refuses on the number before it refuses on the allowance", async () => {
+    const api = calleApiStub();
+    const { placer } = placerWith(api, REAL_CALL_ALLOWANCE);
+
+    await expect(
+      placer.place({ ...anIncidentCall(), phone: "+31699999999" }),
+    ).rejects.toThrow(NumberNotAllowedError);
   });
 });
 

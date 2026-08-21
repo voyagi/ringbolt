@@ -8,6 +8,8 @@ import {
   incidentStates,
   isTerminal,
   openIncidentStates,
+  scheduledStates,
+  severityAtLeast,
   transition,
 } from "./incident.js";
 
@@ -40,9 +42,10 @@ describe("incident state machine", () => {
     }
   });
 
-  it("treats resolved, held and failed as the only terminal states", () => {
+  it("names every terminal state, so a new one cannot be added unnoticed", () => {
     expect(incidentStates.filter(isTerminal).sort()).toEqual([
       "failed",
+      "filtered",
       "held",
       "resolved",
     ]);
@@ -55,6 +58,39 @@ describe("incident state machine", () => {
   it("lets a snooze lead back to another call", () => {
     expect(canTransition("deciding", "snoozed")).toBe(true);
     expect(canTransition("snoozed", "calling")).toBe(true);
+  });
+
+  it("lets an incident held for quiet hours become a call when they end", () => {
+    expect(canTransition("received", "deferred")).toBe(true);
+    expect(canTransition("deferred", "calling")).toBe(true);
+  });
+
+  /**
+   * Suppression exists because this exact problem already rang a phone, so the window closing must
+   * not turn into a late call about it. The next repeat is what rings, judged afresh.
+   */
+  it("never lets a suppressed incident become a call", () => {
+    expect(canTransition("received", "muted")).toBe(true);
+    expect(canTransition("muted", "calling")).toBe(false);
+    expect(canTransition("muted", "filtered")).toBe(true);
+  });
+
+  it("orders severities from most serious to least", () => {
+    expect(severityAtLeast("critical", "high")).toBe(true);
+    expect(severityAtLeast("high", "high")).toBe(true);
+    expect(severityAtLeast("low", "high")).toBe(false);
+    expect(severityAtLeast("low", "low")).toBe(true);
+  });
+
+  /**
+   * Every parked state has to be open, or a repeat of the alert it is holding would open a second
+   * incident and ring a second phone, which is the one thing suppression and quiet hours exist to
+   * prevent.
+   */
+  it("counts every parked state as open", () => {
+    for (const state of scheduledStates) {
+      expect(openIncidentStates).toContain(state);
+    }
   });
 
   /**

@@ -85,10 +85,22 @@ const rollback: RunbookAction = {
 const actions: readonly RunbookAction[] = [killSwitch, rollback];
 
 /**
- * The only way into this list. Phase 3 replaces the body with per-service policy, and because the
- * authorization gate takes the actions this returns rather than looking an id up in the module
- * again, narrowing it here narrows what can run.
+ * The only way into this list, and it takes the ids a service's policy permits rather than the
+ * service name. The authorization gate runs the action objects this returns rather than looking an
+ * id up in the module again, so narrowing the permitted set here narrows what can actually run.
  */
-export function actionsFor(_service: string): readonly RunbookAction[] {
-  return actions;
+export function actionsAllowedBy(
+  allowed: readonly string[],
+): readonly RunbookAction[] {
+  const permitted = new Set(allowed);
+  return actions.filter((action) => permitted.has(action.id));
+}
+
+/** Everything the product can do, for the default policy and for the configuration screens. */
+export function allActionIds(): readonly string[] {
+  return actions.map((action) => action.id);
+}
+
+export function describeActions(): readonly OfferedAction[] {
+  return actions.map(({ run: _unused, ...offered }) => offered);
 }

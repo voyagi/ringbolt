@@ -2,7 +2,12 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { Repo } from "../src/db/repo.js";
 import type { Incident } from "../src/domain/incident.js";
-import { ConfigurationError, readConfig } from "../src/worker/env.js";
+import {
+  ConfigurationError,
+  type LiveConfig,
+  allowedLiveNumbers,
+  readConfig,
+} from "../src/worker/env.js";
 
 const base = {
   RINGBOLT_ENV: "production",
@@ -75,6 +80,47 @@ describe("reading the configuration", () => {
     );
   });
 
+  /**
+   * The rotation can name any contact anybody added, so the numbers a live build may dial are
+   * configuration rather than data. The configured number is always on the list because it is what
+   * the fallback responder uses when no rotation exists.
+   */
+  it("allows only the configured number until more are named", () => {
+    expect(allowedLiveNumbers(readConfig(live) as LiveConfig)).toEqual([
+      "+31612345678",
+    ]);
+  });
+
+  it("keeps the configured number on the list even when it is left off", () => {
+    const config = readConfig({
+      ...live,
+      LIVE_CALL_ALLOWLIST: "+31698765432",
+    }) as LiveConfig;
+    expect(allowedLiveNumbers(config)).toEqual([
+      "+31698765432",
+      "+31612345678",
+    ]);
+  });
+
+  it("refuses an allowlist entry that is not a phone number", () => {
+    expect(() =>
+      readConfig({ ...live, LIVE_CALL_ALLOWLIST: "+31698765432,not-a-number" }),
+    ).toThrow(ConfigurationError);
+  });
+
+  it("refuses a stand-in scenario the stand-in cannot produce", () => {
+    expect(() =>
+      readConfig({ ...base, CALLE_FAKE_SCENARIO: "explodes" }),
+    ).toThrow(ConfigurationError);
+    expect(readConfig(base).CALLE_FAKE_SCENARIO).toBe("answers");
+  });
+
+  it("refuses an admin token too short to be worth having", () => {
+    expect(() => readConfig({ ...base, ADMIN_TOKEN: "short" })).toThrow(
+      ConfigurationError,
+    );
+  });
+
   it("names what is wrong rather than failing anonymously", () => {
     try {
       readConfig({ ...base, PUBLIC_BASE_URL: "not-a-url" });
@@ -102,6 +148,11 @@ describe("patching an incident", () => {
     links: [],
     offeredActions: ["kill_switch"],
     wakeAt: null,
+    wakeReason: null,
+    callAttempts: 1,
+    rotationPosition: 0,
+    contactId: null,
+    callStartedAt: "2026-08-21T12:00:00.000Z",
     createdAt: "2026-08-21T12:00:00.000Z",
     updatedAt: "2026-08-21T12:00:00.000Z",
     callId: "call_one",
@@ -131,5 +182,29 @@ describe("patching an incident", () => {
     expect(cleared?.state).toBe("calling");
     expect(cleared?.offeredActions).toEqual(["kill_switch"]);
     expect(cleared?.updatedAt).toBe("2026-08-21T12:01:00.000Z");
+  });
+
+  /**
+   * Two of these columns cannot hold null, and a patch built by spreading an object can carry a key
+   * whose value happens to be undefined. Writing that as null turns a routine update into a
+   * constraint failure part way through an incident, which on this product is a phone call that
+   * never gets made. Present-but-undefined therefore means the same as absent.
+   */
+  it("skips a field that is present but undefined rather than writing null", async () => {
+    const repo = new Repo(env.DB);
+    await env.DB.prepare(`DELETE FROM incidents WHERE id = ?1`)
+      .bind(incident.id)
+      .run();
+    await repo.createIncident(incident);
+
+    await repo.updateIncident(
+      incident.id,
+      { callAttempts: undefined, outcome: "left alone" },
+      "2026-08-21T12:02:00.000Z",
+    );
+
+    const after = await repo.getIncident(incident.id);
+    expect(after?.callAttempts).toBe(1);
+    expect(after?.outcome).toBe("left alone");
   });
 });

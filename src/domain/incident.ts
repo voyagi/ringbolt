@@ -5,10 +5,13 @@ export const incidentStates = [
   "calling",
   "deciding",
   "acting",
-  "resolved",
-  "held",
+  "deferred",
+  "muted",
   "escalating",
   "snoozed",
+  "resolved",
+  "held",
+  "filtered",
   "failed",
 ] as const;
 
@@ -16,7 +19,7 @@ export type IncidentState = (typeof incidentStates)[number];
 
 /**
  * An incident counts as open while it can still lead to a call. Two things read this: the duplicate
- * check that decides whether a repeat alert rings a phone, and the unique index in migration 0002
+ * check that decides whether a repeat alert rings a phone, and the unique index in migration 0004
  * that enforces one open incident per fingerprint. Change it here and change it there in the same
  * commit, because a state that is open to one and not the other is a silent second phone call.
  */
@@ -25,12 +28,51 @@ export const openIncidentStates = [
   "calling",
   "deciding",
   "acting",
+  "deferred",
+  "muted",
   "escalating",
   "snoozed",
 ] as const satisfies readonly IncidentState[];
 
+/**
+ * States Ringbolt has deliberately parked with a time on them. Each one carries a wakeAt and a
+ * wakeReason, the incident's own Durable Object holds an alarm for it, and the reconciliation sweep
+ * is the backstop for an alarm that never fires.
+ */
+export const scheduledStates = [
+  "deferred",
+  "muted",
+  "snoozed",
+] as const satisfies readonly IncidentState[];
+
+/**
+ * Why an incident is parked, and therefore what happens when its time comes. It is stored on the
+ * incident rather than beside the alarm so that the alarm and the sweep read the same answer.
+ */
+export const wakeReasons = [
+  "no_answer",
+  "snooze_over",
+  "quiet_hours_over",
+  "flap_window_over",
+] as const;
+
+export type WakeReason = (typeof wakeReasons)[number];
+
+export function isWakeReason(value: unknown): value is WakeReason {
+  return (
+    typeof value === "string" &&
+    (wakeReasons as readonly string[]).includes(value)
+  );
+}
+
+/** Most severe first. Everything that compares two severities reads that order from here. */
 export const severities = ["critical", "high", "low"] as const;
 export type Severity = (typeof severities)[number];
+
+/** Whether a severity is at least as serious as a floor. */
+export function severityAtLeast(severity: Severity, floor: Severity): boolean {
+  return severities.indexOf(severity) <= severities.indexOf(floor);
+}
 
 export const alertPayload = z.object({
   service: z.string().min(1).max(120),
@@ -78,8 +120,18 @@ export type Incident = {
   links: IncidentLink[];
   /** The action ids read out on the call, so the set that authorizes is the set the responder heard. */
   offeredActions: string[];
-  /** When a snoozed incident is due to be looked at again. Null in every other state. */
+  /** When this incident is due to be looked at again. Null unless it is parked. */
   wakeAt: string | null;
+  /** What to do when wakeAt arrives. Null unless it is parked. */
+  wakeReason: WakeReason | null;
+  /** How many calls this incident has cost, which is what keeps each attempt's call distinct. */
+  callAttempts: number;
+  /** How far down the rotation this incident has got. A snooze calls the same person back. */
+  rotationPosition: number;
+  /** Who is being called right now, for the audit trail and for the call back after a snooze. */
+  contactId: string | null;
+  /** When the current call was placed, which is the clock the give-up deadline runs on. */
+  callStartedAt: string | null;
   createdAt: string;
   updatedAt: string;
   callId: string | null;
@@ -89,14 +141,19 @@ export type Incident = {
 const allowedTransitions: Readonly<
   Record<IncidentState, readonly IncidentState[]>
 > = {
-  received: ["calling", "failed"],
+  received: ["calling", "deferred", "muted", "filtered", "failed"],
   calling: ["deciding", "escalating", "failed"],
   deciding: ["acting", "held", "escalating", "snoozed", "failed"],
   acting: ["resolved", "failed"],
+  deferred: ["calling", "failed"],
+  // A mute ends by admitting nobody was called about this one, never by calling late: the window
+  // exists precisely because the same problem already rang a phone.
+  muted: ["filtered", "failed"],
   escalating: ["calling", "failed"],
   snoozed: ["calling", "failed"],
   resolved: [],
   held: [],
+  filtered: [],
   failed: [],
 };
 

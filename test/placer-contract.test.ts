@@ -11,6 +11,9 @@ import { calleApiStub } from "./support/calle-api.js";
  * any one implementation. The CALL-E adapter joins this suite by adding a line to the list below,
  * which is the point: an adapter that has not been run through these has not been held to anything.
  */
+/** The placeholder the stand-in carries, which no real telephone can ever be reached on. */
+const CONTRACT_NUMBER = "+00000000000";
+
 const implementations: { name: string; build: () => CallPlacer }[] = [
   {
     name: "the local stand-in",
@@ -30,6 +33,7 @@ const implementations: { name: string; build: () => CallPlacer }[] = [
       new LiveCallPlacer({
         apiKey: "test-key-contract-suite",
         budget: { spent: async () => 0 },
+        allowedNumbers: [CONTRACT_NUMBER],
         // A host that resolves to nothing, so a transport that failed to be installed would fail
         // loudly rather than reach the real API with the suite's made-up key.
         baseUrl: "https://calle.invalid",
@@ -40,7 +44,7 @@ const implementations: { name: string; build: () => CallPlacer }[] = [
 
 function callFor(key: string): PlaceCallInput {
   return {
-    phone: "+00000000000",
+    phone: CONTRACT_NUMBER,
     task: "Tell the responder what has broken and ask what to do.",
     resultSchema: { type: "object" },
     metadata: { incident_id: "inc_contract", service: "checkout" },

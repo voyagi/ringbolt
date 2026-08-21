@@ -14,7 +14,9 @@ import {
   buildOrchestrator,
   immediateScheduler,
   newId,
+  unscheduledWakes,
 } from "../src/worker/wiring.js";
+import { resetTables } from "./support/reset.js";
 
 const alert: AlertPayload = {
   service: "checkout",
@@ -68,10 +70,11 @@ function orchestratorWith(placer: CallPlacer): Orchestrator {
     repo: new Repo(env.DB),
     placer,
     publicBaseUrl: "https://ringbolt.test",
-    responderPhone: "+00000000000",
+    fallbackPhone: "+00000000000",
     now: () => new Date(),
     newId,
     exclusive: (work) => work(),
+    wake: unscheduledWakes,
   });
 }
 
@@ -79,6 +82,7 @@ async function anIncidentWaitingOnADecision(): Promise<Incident> {
   const orchestrator = buildOrchestrator(env, readConfig(env), {
     scheduler: immediateScheduler,
     exclusive: (work) => work(),
+    wake: unscheduledWakes,
   });
   const opened = await orchestrator.open(alert);
   if (opened.kind !== "created")
@@ -92,19 +96,16 @@ async function stateOf(id: string): Promise<Incident> {
   return incident;
 }
 
+async function countActionRuns(): Promise<number> {
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM action_runs`,
+  ).first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
 describe("what the responder said decides where the incident lands", () => {
   beforeEach(async () => {
-    for (const table of [
-      "incident_events",
-      "action_runs",
-      "processed_events",
-      "call_ledger",
-      "incidents",
-      "service_state",
-      "fake_calls",
-    ]) {
-      await env.DB.prepare(`DELETE FROM ${table}`).run();
-    }
+    await resetTables(env.DB);
   });
 
   it("holds only when the responder asked for a hold", async () => {
@@ -119,13 +120,26 @@ describe("what the responder said decides where the incident lands", () => {
    * The inversion this replaces: an explicit spoken escalation used to land in `held`, which has no
    * way out at all, while a call nobody picked up went to `escalating`. A human who answered and
    * asked for help was being treated as less urgent than silence.
+   *
+   * With no rotation configured there is exactly one person to call, so escalating has nowhere to
+   * go and the incident closes rather than sitting on the alert. Handing it to a second contact is
+   * covered in rotation.test.ts, which is where a rotation exists.
    */
-  it("escalates when the responder asked to escalate", async () => {
+  it("escalates when the responder asked to, and closes when there is nobody else", async () => {
     const incident = await anIncidentWaitingOnADecision();
     await orchestratorWith(stubPlacer("fake")).onCallTerminal(
       snapshotFor(incident, { decision: "escalate", reason: "not my system" }),
     );
-    expect((await stateOf(incident.id)).state).toBe("escalating");
+
+    const after = await stateOf(incident.id);
+    expect(after.state).toBe("failed");
+    expect(after.outcome).toBe("escalation_exhausted");
+
+    const kinds = (await new Repo(env.DB).listEvents(incident.id)).map(
+      (event) => event.kind,
+    );
+    expect(kinds).toContain("action.refused");
+    expect(kinds).toContain("incident.escalation_exhausted");
   });
 
   it("snoozes with the minutes kept rather than parsed and dropped", async () => {
@@ -166,14 +180,27 @@ describe("what the responder said decides where the incident lands", () => {
     expect((await stateOf(incident.id)).state).toBe("calling");
   });
 
-  it("keeps a mechanical refusal in escalating", async () => {
+  /**
+   * A decision Ringbolt could not trust goes to a person, not to a bin. With nobody else in the
+   * rotation that person does not exist, so the incident closes and names why rather than holding
+   * the alert open and silencing every later repeat of it.
+   */
+  it("sends a decision below the confidence floor to the rotation", async () => {
     const incident = await anIncidentWaitingOnADecision();
     const snapshot = snapshotFor(incident, { decision: "run_action" });
     await orchestratorWith(stubPlacer("fake")).onCallTerminal({
       ...snapshot,
       confidenceScore: 0.2,
     } as VerifiedCall);
-    expect((await stateOf(incident.id)).state).toBe("escalating");
+
+    expect((await stateOf(incident.id)).state).toBe("failed");
+    const refusal = (await new Repo(env.DB).listEvents(incident.id)).find(
+      (event) => event.kind === "action.refused",
+    );
+    expect(refusal?.data).toMatchObject({
+      refusal: "confidence_below_floor",
+    });
+    expect(await countActionRuns()).toBe(0);
   });
 
   /**
@@ -198,14 +225,15 @@ describe("what the responder said decides where the incident lands", () => {
       }),
     );
 
-    expect((await stateOf(incident.id)).state).toBe("escalating");
-    expect((await stateOf(incident.id)).outcome).toBe(
-      "action_not_offered:run_action",
+    // Nothing ran, which is the property. Where the incident went afterwards is the rotation's
+    // business, and the reason it was refused is on the event rather than on the row, because the
+    // row's outcome carries the final disposition.
+    expect(await countActionRuns()).toBe(0);
+    const refusal = (await new Repo(env.DB).listEvents(incident.id)).find(
+      (event) => event.kind === "action.refused",
     );
-    const runs = await env.DB.prepare(
-      `SELECT COUNT(*) AS n FROM action_runs`,
-    ).first<{ n: number }>();
-    expect(runs?.n).toBe(0);
+    expect(refusal?.data).toMatchObject({ refusal: "action_not_offered" });
+    expect((await stateOf(incident.id)).state).toBe("failed");
   });
 
   it("records what was read out so the decision can be checked against it", async () => {
@@ -225,6 +253,7 @@ describe("what the responder said decides where the incident lands", () => {
     const repeat = await buildOrchestrator(env, readConfig(env), {
       scheduler: immediateScheduler,
       exclusive: (work) => work(),
+      wake: unscheduledWakes,
     }).open(alert);
     expect(repeat.kind).toBe("duplicate");
   });
@@ -232,9 +261,7 @@ describe("what the responder said decides where the incident lands", () => {
 
 describe("a telephone that will not dial", () => {
   beforeEach(async () => {
-    for (const table of ["incident_events", "incidents", "fake_calls"]) {
-      await env.DB.prepare(`DELETE FROM ${table}`).run();
-    }
+    await resetTables(env.DB);
   });
 
   /**
@@ -261,14 +288,7 @@ describe("a telephone that will not dial", () => {
 
 describe("the real-call budget", () => {
   beforeEach(async () => {
-    for (const table of [
-      "incident_events",
-      "call_ledger",
-      "incidents",
-      "fake_calls",
-    ]) {
-      await env.DB.prepare(`DELETE FROM ${table}`).run();
-    }
+    await resetTables(env.DB);
   });
 
   it("counts a call placed by a real placer", async () => {

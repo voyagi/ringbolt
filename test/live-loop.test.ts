@@ -9,8 +9,10 @@ import {
   buildOrchestrator,
   buildPlacer,
   immediateScheduler,
+  unscheduledWakes,
 } from "../src/worker/wiring.js";
 import { type CalleApiStub, calleApiStub } from "./support/calle-api.js";
+import { resetTables } from "./support/reset.js";
 
 /**
  * The same loop `test/loop.test.ts` runs against the stand-in, run again through the CALL-E
@@ -38,6 +40,7 @@ function liveOrchestrator(api: CalleApiStub) {
   return buildOrchestrator(env, readConfig(LIVE_ENV), {
     scheduler: immediateScheduler,
     exclusive: (work) => work(),
+    wake: unscheduledWakes,
     calleFetch: api.fetch,
   });
 }
@@ -51,17 +54,7 @@ function livePlacer(api: CalleApiStub) {
 
 describe("the loop running on the CALL-E adapter", () => {
   beforeEach(async () => {
-    for (const table of [
-      "incident_events",
-      "action_runs",
-      "processed_events",
-      "call_ledger",
-      "incidents",
-      "service_state",
-      "fake_calls",
-    ]) {
-      await env.DB.prepare(`DELETE FROM ${table}`).run();
-    }
+    await resetTables(env.DB);
   });
 
   it("takes an alert all the way to a changed system", async () => {
@@ -130,9 +123,11 @@ describe("the loop running on the CALL-E adapter", () => {
     );
 
     const repo = new Repo(env.DB);
-    expect((await repo.getIncident(opened.incident.id))?.state).toBe(
-      "escalating",
-    );
+    // With nobody else in the rotation the escalation has nowhere to go, so the incident closes
+    // and says so rather than sitting on the alert. What matters here is that nothing ran.
+    const settled = await repo.getIncident(opened.incident.id);
+    expect(settled?.state).toBe("failed");
+    expect(settled?.outcome).toBe("escalation_exhausted");
     const runs = await env.DB.prepare(
       `SELECT COUNT(*) AS n FROM action_runs`,
     ).first<{ n: number }>();

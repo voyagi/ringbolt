@@ -22,24 +22,69 @@ npm run db:migrate:remote
 
 Three values are plain configuration and live in `wrangler.jsonc` under `vars`:
 
-| Name              | What it does                                                                                 |
-| ----------------- | -------------------------------------------------------------------------------------------- |
-| `RINGBOLT_ENV`    | `development`, `preview`, or `production`. Outside development, an intake token is required. |
-| `PUBLIC_BASE_URL` | The deployed URL. CALL-E sends its webhooks here, so it has to be the real one.              |
-| `CALLE_MODE`      | `fake` dials nothing. `live` places real calls. See below.                                   |
+| Name                  | What it does                                                                                 |
+| --------------------- | -------------------------------------------------------------------------------------------- |
+| `RINGBOLT_ENV`        | `development`, `preview`, or `production`. Outside development, an intake token is required. |
+| `PUBLIC_BASE_URL`     | The deployed URL. CALL-E sends its webhooks here, so it has to be the real one.              |
+| `CALLE_MODE`          | `fake` dials nothing. `live` places real calls. See below.                                   |
+| `LIVE_CALL_ALLOWLIST` | Every number a live build may ring, comma separated. `DEMO_PHONE` is always included.        |
 
-Two are secrets, set with `wrangler secret put` and never written to a file in this repository:
+The rest are secrets, set with `wrangler secret put` and never written to a file in this repository:
 
 ```bash
 wrangler secret put INTAKE_TOKEN    # any long random string, used in the intake URL
+wrangler secret put ADMIN_TOKEN     # any long random string, guards /api/config
 wrangler secret put DEMO_PHONE      # the number Ringbolt calls, in E.164, live mode only
 ```
 
 A cron trigger runs once a minute and is declared in `wrangler.jsonc`, so `wrangler deploy` sets it
-up. It re-reads any call that has not reported back and clears out expired webhook event ids.
+up. It is the backstop behind the per-incident alarms: it wakes any incident whose alarm was lost,
+closes one that is waiting for nothing, and clears out expired webhook event ids.
 
 `INTAKE_TOKEN` is what stops a stranger opening incidents and making your phone ring, so treat it
-as a credential and rotate it if it leaks.
+as a credential and rotate it if it leaks. `ADMIN_TOKEN` is stronger than that: it guards the
+endpoints that decide whose number gets dialled. Outside development those endpoints refuse to
+serve at all until it is set, so a deployment that forgets it is locked rather than open.
+
+## Policy, contacts, and the rotation
+
+Everything an operator configures lives under `/api/config`, and every request there carries
+`Authorization: Bearer $ADMIN_TOKEN`.
+
+```bash
+# who can be called
+curl -X POST https://your-worker-url/api/config/contacts \
+  -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d '{"name":"Kim","phone":"+31612345678"}'
+
+# the order they are called in, for one service or for '*', which is the shared rota
+curl -X PUT https://your-worker-url/api/config/rotation/checkout \
+  -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d '{"contactIds":["con_first","con_second"]}'
+
+# what wakes somebody for this service, and what may be offered on the call
+curl -X PUT https://your-worker-url/api/config/services/checkout \
+  -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d '{"minSeverity":"high",
+       "quietHours":{"startMinute":1320,"endMinute":420,"zone":"Europe/Amsterdam","minSeverity":"critical"},
+       "allowedActions":["kill_switch"],
+       "flapWindowMinutes":15,"maxCallsPerWindow":1,"escalateAfterMinutes":3}'
+```
+
+| Field                  | What it does                                                                              |
+| ---------------------- | ----------------------------------------------------------------------------------------- |
+| `minSeverity`          | Below this, the alert is recorded and nobody is telephoned.                               |
+| `quietHours`           | Minutes from local midnight in a named IANA zone, and the severity that still rings.      |
+| `allowedActions`       | The action ids that may be read out on a call for this service.                           |
+| `flapWindowMinutes`    | How far back Ringbolt looks when deciding whether this problem already rang a phone.      |
+| `maxCallsPerWindow`    | How many calls that window is allowed to contain. One is what makes one problem one call. |
+| `escalateAfterMinutes` | How long a call has to produce something before the next person is tried.                 |
+
+A service with no policy of its own calls about everything, keeps no quiet hours, permits every
+action, and allows one call per fifteen minutes. A service with no rotation of its own uses `*`, and
+with no rotation at all `DEMO_PHONE` is who gets called. `GET /api/config/actions` lists the action
+ids a policy may name; a policy naming one this build does not have is refused rather than quietly
+narrowing what a responder is offered.
 
 ## Deploy
 
@@ -88,9 +133,14 @@ ring:
 1. `PUBLIC_BASE_URL` is the deployed URL, because that is where CALL-E delivers the outcome. A
    webhook that cannot be delivered leaves the sweep to recover the call a few minutes later.
 2. `CALLE_API_KEY` is set. Configuration is refused without it, and `/health` says so.
-3. `DEMO_PHONE` is set and is a valid E.164 number. Ringbolt dials this number and no other until
-   the rotation lands.
-4. `LIVE_MODE_AVAILABLE` in `src/worker/env.ts` is `true`. Set it to `false` to take the whole
+3. `DEMO_PHONE` is set and is a valid E.164 number. It is who gets called when no rotation has been
+   configured, and it is always allowed to be dialled.
+4. The number being dialled is on the list. A live build rings only `DEMO_PHONE` plus whatever
+   `LIVE_CALL_ALLOWLIST` names, comma separated and each in E.164. The rotation can name any contact
+   anybody adds through the configuration endpoint, so without this the set of telephones a
+   deployment can reach would be a database table rather than something an operator wrote down. A
+   number that is not on it is refused and nothing is sent to CALL-E.
+5. `LIVE_MODE_AVAILABLE` in `src/worker/env.ts` is `true`. Set it to `false` to take the whole
    build off the telephone regardless of what any environment says, which is worth doing when
    something is looping and the remaining allowance matters more than the alerts.
 

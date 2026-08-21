@@ -13,6 +13,8 @@ export interface IncidentActor {
   callTerminal(snapshot: VerifiedCall): Promise<void>;
   abandonCall(incidentId: string, detail: string): Promise<void>;
   closeStalled(incidentId: string, reason: StallReason): Promise<void>;
+  /** Comes back to an incident whose scheduled time has arrived, or whose alarm was lost. */
+  wake(incidentId: string): Promise<void>;
 }
 
 /**
