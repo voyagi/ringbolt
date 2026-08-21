@@ -1,0 +1,196 @@
+import { z } from "zod";
+
+/**
+ * The shape Ringbolt asks CALL-E to extract from the conversation. It is sent as the call's
+ * `resultSchema` so the spoken answer comes back validated rather than as prose we have to guess at.
+ */
+export const decisionResultSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["decision"],
+  properties: {
+    decision: {
+      type: "string",
+      enum: ["run_action", "hold", "escalate", "snooze"],
+      description:
+        "What the responder decided. run_action means carry out one of the offered actions. hold means change nothing. escalate means hand this to someone else. snooze means leave it and call back later.",
+    },
+    action_id: {
+      type: "string",
+      description:
+        "The id of the action to run. Required when decision is run_action. Must be one of the action ids read out on the call.",
+    },
+    confirmation_phrase: {
+      type: "string",
+      description:
+        "The exact confirmation phrase the responder said out loud. Required for any action marked as needing confirmation.",
+    },
+    snooze_minutes: {
+      type: "number",
+      description:
+        "How long to wait before calling back. Only when decision is snooze.",
+    },
+    reason: {
+      type: "string",
+      description: "The responder's own words for why they decided this.",
+    },
+  },
+} as const;
+
+export const decisionKinds = [
+  "run_action",
+  "hold",
+  "escalate",
+  "snooze",
+] as const;
+export type DecisionKind = (typeof decisionKinds)[number];
+
+export const spokenDecision = z.object({
+  decision: z.enum(decisionKinds),
+  action_id: z.string().min(1).optional(),
+  confirmation_phrase: z.string().optional(),
+  snooze_minutes: z
+    .number()
+    .finite()
+    .positive()
+    .max(24 * 60)
+    .optional(),
+  reason: z.string().optional(),
+});
+
+export type SpokenDecision = z.infer<typeof spokenDecision>;
+
+export const CONFIDENCE_FLOOR = 0.7;
+
+export type AuthorizationInput = {
+  callStatus: string;
+  taskCompleted: boolean | null;
+  confidenceScore: number | null;
+  structuredResult: unknown;
+  offeredActionIds: readonly string[];
+  /** Actions that may not run on a decision alone, mapped to the phrase the responder must say. */
+  confirmationPhrases: Readonly<Record<string, string>>;
+};
+
+export type Authorization =
+  | { authorized: true; decision: SpokenDecision; actionId: string }
+  | {
+      authorized: false;
+      refusal: RefusalReason;
+      detail: string;
+      decision?: SpokenDecision;
+    };
+
+export type RefusalReason =
+  | "call_not_completed"
+  | "task_not_completed"
+  | "confidence_below_floor"
+  | "result_not_schema_valid"
+  | "not_an_action_decision"
+  | "action_not_offered"
+  | "confirmation_missing"
+  | "confirmation_mismatch";
+
+/**
+ * Every refusal here is a decision NOT to touch production. The order matters: cheaper and more
+ * fundamental checks run first so the detail message names the earliest thing that was wrong,
+ * which is the one worth showing a human.
+ */
+export function authorize(input: AuthorizationInput): Authorization {
+  if (input.callStatus !== "completed") {
+    return {
+      authorized: false,
+      refusal: "call_not_completed",
+      detail: `call status was ${input.callStatus}`,
+    };
+  }
+
+  if (input.taskCompleted !== true) {
+    return {
+      authorized: false,
+      refusal: "task_not_completed",
+      detail: "the call ended without the task being completed",
+    };
+  }
+
+  const score = input.confidenceScore;
+  if (score === null || score < CONFIDENCE_FLOOR) {
+    return {
+      authorized: false,
+      refusal: "confidence_below_floor",
+      detail: `confidence ${score ?? "unknown"} is below the floor of ${CONFIDENCE_FLOOR}`,
+    };
+  }
+
+  const parsed = spokenDecision.safeParse(input.structuredResult);
+  if (!parsed.success) {
+    return {
+      authorized: false,
+      refusal: "result_not_schema_valid",
+      detail: parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
+        .join("; "),
+    };
+  }
+
+  const decision = parsed.data;
+  if (decision.decision !== "run_action") {
+    return {
+      authorized: false,
+      refusal: "not_an_action_decision",
+      detail: `responder chose to ${decision.decision}`,
+      decision,
+    };
+  }
+
+  const actionId = decision.action_id;
+  if (actionId === undefined || !input.offeredActionIds.includes(actionId)) {
+    return {
+      authorized: false,
+      refusal: "action_not_offered",
+      detail: `${actionId ?? "no action"} was not among the actions offered on this call`,
+      decision,
+    };
+  }
+
+  const requiredPhrase = input.confirmationPhrases[actionId];
+  if (requiredPhrase !== undefined) {
+    const spoken = decision.confirmation_phrase;
+    if (spoken === undefined || spoken.trim() === "") {
+      return {
+        authorized: false,
+        refusal: "confirmation_missing",
+        detail: `${actionId} needs the spoken phrase "${requiredPhrase}"`,
+        decision,
+      };
+    }
+    if (!phrasesMatch(spoken, requiredPhrase)) {
+      return {
+        authorized: false,
+        refusal: "confirmation_mismatch",
+        detail: `heard "${spoken}" but this action needs "${requiredPhrase}"`,
+        decision,
+      };
+    }
+  }
+
+  return { authorized: true, decision, actionId };
+}
+
+/**
+ * Speech to text does not preserve punctuation, casing, or filler, so an exact string compare would
+ * refuse phrases a person plainly said. Normalising to words is as loose as this is allowed to get:
+ * the words themselves, in order, still have to be right.
+ */
+function phrasesMatch(spoken: string, required: string): boolean {
+  return normalisePhrase(spoken) === normalisePhrase(required);
+}
+
+function normalisePhrase(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 0)
+    .join(" ");
+}

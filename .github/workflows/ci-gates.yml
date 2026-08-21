@@ -1,0 +1,64 @@
+# CI floor for the Wave 1 scaffold gates. Drop into .github/workflows/ in the product repo.
+# Runs the SAME `npm run gate` scripts as the local pre-commit hook = one source of truth, no drift.
+# Lean on purpose (PR + default-branch push only): public repos get unlimited Actions minutes, private
+# repos are metered, so do not add a schedule here (see SHIP-SAFE-CHECKLIST.md "Actions budget").
+name: gates
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+# Least privilege: `npm ci` executes third-party postinstall scripts, so the job's GITHUB_TOKEN
+# must not carry write scopes. Nothing in this workflow writes to the repo.
+permissions:
+  contents: read
+# One run per ref: rapid PR pushes cancel their stale runs (metered minutes on private repos);
+# default-branch runs are never cancelled so main always gets a complete verdict.
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      # SHA-pinned (estate decision 2026-07-19, aligning with launch-kiln's shipped CI): a tag is
+      # mutable, a commit SHA is not. Trailing comment names the tag the SHA was verified against
+      # (git ls-remote) so bumps stay reviewable. Update SHAs deliberately, never back to bare tags.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # align with the product's .nvmrc / package.json engines.node; if it has a .nvmrc,
+          # prefer `node-version-file: '.nvmrc'` so CI and local never drift.
+          node-version: 20
+          cache: npm
+      # Swap `npm ci` + the `npm run` calls below for the product's package manager (pnpm/bun/yarn)
+      # if it does not use npm - this file hardcodes npm.
+      - run: npm ci
+      # Build first so the frontend size-limit gate has a bundle to measure. `--if-present` makes this
+      # a no-op on backend/CLI products with no build script (without a build, size-limit errors "no
+      # files found" and the gate fails for the wrong reason).
+      - run: npm run build --if-present
+      # Each gate is a FLOOR: green = no known violation, never "good". Taste/craft is NOT gated here
+      # (it routes to the decorrelated reviewer). Do not "make the gate pass" by suppressing it.
+      # verify:ship rather than gate: there is no separate test workflow, so this is the only place
+      # CI runs the full surface (types, the whole suite, whole-repo lint, then the gate chain).
+      - run: npm run verify:ship
+      # The client-secret step belongs here and is deliberately absent until there is something for
+      # it to read. Ringbolt serves its pages from the Worker today and has no client bundle, so the
+      # gate would correctly report UNKNOWN and paint CI red for a bundle that does not exist. Phase
+      # 5 builds the dashboard, and that phase does not count as done until this step is back and
+      # green. The gate and its mutation harness are installed and proven either way.
+      # Client-secret gate, as its OWN step rather than inside `npm run gate`. It needs a BUILT
+      # bundle, and `gate` also runs in the pre-commit hook where none exists - there it would
+      # correctly report UNKNOWN (exit 2) and fail every commit, so it would be deleted within a
+      # day. Here a build always precedes it (the step above). This is the mechanical wiring: a
+      # prompt line telling a model to run the gate is the thing the gate itself argues against.
+      # If this exits 2 saying no bundle was found, the fix is almost never to delete the step. The
+      # gate auto-detects the common layouts, and a monorepo (packages/web/dist) or a custom outDir
+      # is found by NO fixed list, so PASS THE DIRECTORY: `node scripts/vendor/check-client-secrets.mjs
+      # packages/web/dist`. It accepts several. Delete this step ONLY on a product that genuinely
+      # ships no client bundle at all (a CLI, a pure backend) - a Next.js app or a monorepo package
+      # HAS one, and deleting the gate there removes it from exactly the products it protects.
+      # If the product has no separate test/lint workflow, swap the step above for
+      # `npm run verify:ship` (types -> FULL tests -> whole-repo lint -> gate) so CI enforces
+      # the same full surface the local ship step verifies. With a separate test workflow,
+      # keep `npm run gate` here to avoid running the suite twice.
