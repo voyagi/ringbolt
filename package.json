@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "wrangler dev",
+    "dev:scheduled": "wrangler dev --test-scheduled",
     "deploy": "wrangler deploy",
     "test": "vitest run",
     "test:watch": "vitest",

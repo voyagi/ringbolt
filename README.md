@@ -73,6 +73,9 @@ npm run db:migrate:local
 npm run dev
 ```
 
+Use `npm run dev:scheduled` instead if you want to trigger the reconciliation sweep by hand at
+`/__scheduled`, which is how you watch a lost webhook get recovered without waiting for the cron.
+
 That starts against a local stand-in for CALL-E, so nothing dials a telephone. Fire an alert at
 it:
 

@@ -102,6 +102,44 @@ describe("the loop running on the CALL-E adapter", () => {
     });
   });
 
+  /**
+   * What CALL-E reports as `call.result_validation_failed`: the conversation happened and it is
+   * confident the task was done, but nothing it heard fits the requested schema, so the task-level
+   * result comes back null. A responder said something and it could not be pinned down, which is
+   * the exact case this product exists to escalate rather than guess at.
+   */
+  it("escalates when the call completed but no decision could be pinned down", async () => {
+    const api = calleApiStub();
+    const orchestrator = liveOrchestrator(api);
+
+    const opened = await orchestrator.open(alert);
+    if (opened.kind !== "created") throw new Error("the incident was not made");
+    const callId = opened.incident.callId;
+    if (callId === null) throw new Error("no call was recorded");
+
+    api.settle(callId, {
+      status: "completed",
+      task_completed: true,
+      completion_confidence: { score: 0.95, label: "high" },
+      structured_result: null,
+      summary: "The responder was reached but no decision could be extracted.",
+    });
+
+    await orchestrator.onCallTerminal(
+      await verifyCall(livePlacer(api), callId),
+    );
+
+    const repo = new Repo(env.DB);
+    expect((await repo.getIncident(opened.incident.id))?.state).toBe(
+      "escalating",
+    );
+    const runs = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM action_runs`,
+    ).first<{ n: number }>();
+    expect(runs?.n).toBe(0);
+    expect(await repo.getServiceState("checkout")).toBeNull();
+  });
+
   /** A real call is dialled at the configured number, and the API is told to call that number. */
   it("dials the configured number and nothing else", async () => {
     const api = calleApiStub();
