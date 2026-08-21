@@ -1,0 +1,14 @@
+# The product's real browser support target. eslint-plugin-compat checks web APIs against this.
+# Replace `defaults` with the product's actual targets, but KEEP `not op_mini all`:
+# Opera Mini is a proxy browser that supports almost no modern API (fetch, Promise.all,
+# structuredClone), so leaving it in makes the compat gate false-positive on completely normal
+# code. Proven 2026-06-25: a real product flagged 20 false "fetch not supported in op_mini all"
+# errors with a bare `defaults`; adding `not op_mini all` dropped them to zero with no real gap lost.
+#
+# IMPORTANT - use EXACTLY ONE browserslist source. If the product ALREADY has a `browserslist` key in
+# package.json (most frontend products do), do NOT also add this file: browserslist THROWS "contains
+# both .browserslistrc and package.json with browserslist" and the compat gate breaks (verified
+# 2026-06-25). In that case, add `not op_mini all` to the existing package.json list instead.
+defaults
+not op_mini all
+not dead

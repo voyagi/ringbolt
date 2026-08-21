@@ -1,0 +1,7 @@
+[
+  {
+    "name": "main bundle",
+    "path": "dist/**/*.js",
+    "limit": "150 kB"
+  }
+]

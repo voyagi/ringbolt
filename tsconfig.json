@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node", "vite/client"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "src",
+    "scripts",
+    "worker-configuration.d.ts",
+    "*.config.ts",
+    "*.config.mjs"
+  ],
+  // test/fault holds the fault-injection template. It needs a Toxiproxy server and two dev
+  // dependencies that the attack pass installs, so it is excluded until that pass wires it up.
+  "exclude": ["node_modules", "dist", ".wrangler", "test/fault"]
+}
