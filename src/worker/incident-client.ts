@@ -11,19 +11,21 @@ import type { Bindings } from "./env.js";
 export interface IncidentActor {
   open(alert: AlertPayload): Promise<OpenResult>;
   callTerminal(snapshot: VerifiedCall): Promise<void>;
+  abandonCall(incidentId: string, detail: string): Promise<void>;
 }
 
 /**
- * One incident is one object, and this is the only place that decides which. Service plus title is
- * the same grouping the fingerprint uses, so a repeat alert reaches the object that is already
- * handling it instead of starting a second one beside it.
+ * One incident is one object, addressed by the incident's fingerprint. That is the same value
+ * `fingerprintFor` uses to decide whether an alert is a repeat, so the grouping that says two
+ * alerts are one incident and the grouping that gives them one owner cannot disagree. They did:
+ * addressing by service and title split any sender that supplies its own fingerprint, which the
+ * deploy guide recommends doing, into two objects writing to one incident.
  */
 export function incidentStub(
   env: Bindings,
-  service: string,
-  title: string,
+  fingerprint: string,
 ): IncidentActor {
   const namespace = env.INCIDENT;
-  const stub = namespace.get(namespace.idFromName(`${service}::${title}`));
+  const stub = namespace.get(namespace.idFromName(fingerprint));
   return stub as unknown as IncidentActor;
 }

@@ -242,9 +242,10 @@ export class FakeCallPlacer implements CallPlacer {
         body: JSON.stringify(event),
       });
     } catch {
-      // The real CALL-E retries a delivery that does not land, and the terminal snapshot is
-      // already stored by this point. Throwing here would make an undelivered webhook look like a
-      // lost call, which is the one thing the reconciliation path exists to prevent.
+      // The real CALL-E retries a delivery that does not land, and the terminal snapshot is already
+      // stored by this point, so the call is readable whether or not the webhook ever arrives.
+      // Swallowing it here is what lets a test exercise the recovery path in src/worker/reconcile.ts,
+      // which re-reads any incident left waiting on a call and finishes it.
     }
   }
 }

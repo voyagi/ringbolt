@@ -36,6 +36,9 @@ jobs:
       # Build first so the frontend size-limit gate has a bundle to measure. `--if-present` makes this
       # a no-op on backend/CLI products with no build script (without a build, size-limit errors "no
       # files found" and the gate fails for the wrong reason).
+      # There is deliberately no build script here yet. Ringbolt serves everything from the Worker
+      # until phase 5 creates the client bundle, and a `vite build` with no entry module exits 1, so
+      # leaving the script in place made this workflow unable to go green on its very first run.
       - run: npm run build --if-present
       # Each gate is a FLOOR: green = no known violation, never "good". Taste/craft is NOT gated here
       # (it routes to the decorrelated reviewer). Do not "make the gate pass" by suppressing it.

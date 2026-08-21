@@ -34,9 +34,11 @@ export type CallSnapshot = {
 };
 
 /**
- * The only way Ringbolt reaches a telephone. Two implementations exist and both are held to the
- * same contract tests: one talks to CALL-E, one is a local fake. Development runs on the fake
- * because the real-call budget is small and every real call reaches an actual phone.
+ * The only way Ringbolt reaches a telephone. One implementation exists today, the local stand-in,
+ * and `test/placer-contract.test.ts` is the suite any second one has to satisfy: it is written
+ * against this interface rather than against the stand-in, so the CALL-E adapter is added to it by
+ * naming a second implementation. Development runs on the stand-in because the real-call budget is
+ * small and every real call reaches an actual phone.
  */
 export interface CallPlacer {
   place(input: PlaceCallInput): Promise<CallSnapshot>;

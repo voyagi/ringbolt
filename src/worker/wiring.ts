@@ -5,8 +5,13 @@ import {
 } from "../calle/fake.js";
 import type { CallPlacer, PlaceCallInput, Scheduler } from "../calle/port.js";
 import { Repo } from "../db/repo.js";
+import type { Exclusive } from "../domain/orchestrator.js";
 import { Orchestrator } from "../domain/orchestrator.js";
-import type { Bindings, RingboltConfig } from "./env.js";
+import {
+  type Bindings,
+  LIVE_MODE_AVAILABLE,
+  type RingboltConfig,
+} from "./env.js";
 
 /**
  * Until phase 3 there is one responder, and until the owner supplies a number there is not even
@@ -47,17 +52,25 @@ function defaultScenario(
   });
 }
 
-export type WiringOptions = {
+export type PlacerOptions = {
   scheduler: Scheduler;
   now?: () => Date;
   scenarioFor?: (input: PlaceCallInput) => FakeScenario;
+};
+
+export type OrchestratorOptions = PlacerOptions & {
   responderPhone?: string;
+  /**
+   * Required rather than defaulted, because a default would be an unserialised one and the caller
+   * that most needs the section is the one least likely to notice it is missing.
+   */
+  exclusive: Exclusive;
 };
 
 export function buildPlacer(
   env: Bindings,
   config: RingboltConfig,
-  options: WiringOptions,
+  options: PlacerOptions,
 ): CallPlacer {
   const now = options.now ?? (() => new Date());
 
@@ -71,13 +84,19 @@ export function buildPlacer(
     });
   }
 
-  throw new Error("the live CALL-E placer arrives in phase 2");
+  // readConfig refuses live mode while LIVE_MODE_AVAILABLE is false, so reaching this line means
+  // the two have drifted apart. Fail closed rather than dial something that does not exist.
+  throw new Error(
+    LIVE_MODE_AVAILABLE
+      ? "the live CALL-E placer is not wired up"
+      : "live mode was accepted by the configuration but no CALL-E adapter is built",
+  );
 }
 
 export function buildOrchestrator(
   env: Bindings,
   config: RingboltConfig,
-  options: WiringOptions,
+  options: OrchestratorOptions,
 ): Orchestrator {
   const now = options.now ?? (() => new Date());
   return new Orchestrator({
@@ -87,5 +106,6 @@ export function buildOrchestrator(
     responderPhone: options.responderPhone ?? UNCONFIGURED_RESPONDER,
     now,
     newId,
+    exclusive: options.exclusive,
   });
 }

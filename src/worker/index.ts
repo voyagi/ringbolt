@@ -5,12 +5,21 @@ import {
   verifyCall,
 } from "../calle/verify.js";
 import { Repo } from "../db/repo.js";
-import { alertPayload } from "../domain/incident.js";
+import { alertPayload, fingerprintFor } from "../domain/incident.js";
+import { incidentIdOf } from "../domain/orchestrator.js";
 import { ConfigurationError, type Bindings, readConfig } from "./env.js";
 import { incidentStub } from "./incident-client.js";
+import { reconcile } from "./reconcile.js";
 import { buildPlacer, waitUntilScheduler } from "./wiring.js";
 
 export { IncidentDurableObject } from "./incident-do.js";
+
+/**
+ * How long a delivery may hold a claim on an event id before another delivery of the same id may
+ * take it over. It only matters when a delivery neither completes nor releases, which means the
+ * isolate handling it died mid-flight.
+ */
+const CLAIM_STALE_AFTER_MS = 2 * 60 * 1000;
 
 const app = new Hono<{ Bindings: Bindings }>();
 
@@ -53,18 +62,20 @@ app.post("/intake/:token", async (c) => {
   }
 
   const alert = parsed.data;
-  const result = await incidentStub(c.env, alert.service, alert.title).open(
-    alert,
-  );
+  const result = await incidentStub(c.env, fingerprintFor(alert)).open(alert);
+  const body = {
+    incident: result.incident.id,
+    state: result.incident.state,
+    duplicate: result.kind === "duplicate",
+  };
 
-  return c.json(
-    {
-      incident: result.incident.id,
-      state: result.incident.state,
-      duplicate: result.kind === "duplicate",
-    },
-    202,
-  );
+  // A telephone that would not dial is reported as such rather than as an accepted alert. The
+  // incident is closed as failed, so the sender retrying makes a fresh attempt instead of being
+  // answered as a duplicate of the one that never rang.
+  if (result.kind === "call_failed")
+    return c.json({ ...body, error: result.detail }, 502);
+
+  return c.json(body, 202);
 });
 
 /**
@@ -81,35 +92,47 @@ app.post("/webhooks/calle", async (c) => {
   );
   if (eventId === null) return c.json({ error: "no usable event id" }, 400);
 
-  const repo = new Repo(c.env.DB);
-  const isNew = await repo.claimEvent(eventId, new Date().toISOString());
-  // Deliveries are at least once, so a repeat is expected traffic rather than an error.
-  if (!isNew) return c.json({ ok: true, duplicate: true });
-
   const callId = callIdFromDelivery(body);
   if (callId === null)
     return c.json({ error: "no call id in the delivery" }, 400);
 
+  // Nothing is written before this point. The endpoint is unauthenticated by necessity, so a
+  // caller who has not named a call that genuinely exists must not be able to leave a row behind,
+  // and above all must not be able to spend an event id that a real delivery still needs.
   const placer = buildPlacer(c.env, config, {
     scheduler: waitUntilScheduler(c.executionCtx),
   });
   const snapshot = await verifyCall(placer, callId);
 
-  const incidentId =
-    typeof snapshot.metadata["incident_id"] === "string"
-      ? snapshot.metadata["incident_id"]
-      : null;
+  const incidentId = incidentIdOf(snapshot);
   if (incidentId === null)
     return c.json({ ok: true, ignored: "call has no incident" });
 
+  const repo = new Repo(c.env.DB);
   const incident = await repo.getIncident(incidentId);
   if (incident === null)
     return c.json({ ok: true, ignored: "unknown incident" });
 
-  await incidentStub(c.env, incident.service, incident.title).callTerminal(
-    snapshot,
+  const startedAt = new Date();
+  const claimed = await repo.claimEvent(
+    eventId,
+    startedAt.toISOString(),
+    new Date(startedAt.getTime() - CLAIM_STALE_AFTER_MS).toISOString(),
   );
+  // Deliveries are at least once, so a repeat is expected traffic rather than an error.
+  if (!claimed) return c.json({ ok: true, duplicate: true });
 
+  try {
+    await incidentStub(c.env, incident.fingerprint).callTerminal(snapshot);
+  } catch (error) {
+    // The claim is the thing that makes a retry a no-op, so a delivery that did not finish its
+    // work has to give it back. The provider retrying is the only recovery this design has, and
+    // holding the id while answering a non-200 disarms it.
+    await repo.releaseEvent(eventId);
+    throw error;
+  }
+
+  await repo.completeEvent(eventId, new Date().toISOString());
   return c.json({ ok: true });
 });
 
@@ -178,4 +201,20 @@ function timingSafeEqual(a: string, b: string): boolean {
   return difference === 0;
 }
 
-export default app;
+export default {
+  fetch: app.fetch,
+  /**
+   * The reconciliation sweep. A webhook is the happy path, not a guarantee, so this is what makes
+   * a lost delivery recoverable rather than final.
+   */
+  async scheduled(
+    _controller: ScheduledController,
+    env: Bindings,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    await reconcile(env, {
+      scheduler: waitUntilScheduler(ctx),
+      now: () => new Date(),
+    });
+  },
+};

@@ -23,6 +23,14 @@ const envSchema = z.object({
 
 export type RingboltConfig = z.infer<typeof envSchema>;
 
+/**
+ * Whether a build of Ringbolt can actually reach CALL-E. Phase 2 writes that adapter and flips this
+ * to true in the same commit. Until then `live` is refused here, at the configuration boundary,
+ * rather than at the moment a phone was supposed to ring: an operator who follows a go-live
+ * procedure has to be told by the health check, not by every intake returning a five hundred.
+ */
+export const LIVE_MODE_AVAILABLE: boolean = false;
+
 export type Bindings = {
   DB: D1Database;
   INCIDENT: DurableObjectNamespace;
@@ -46,10 +54,17 @@ export function readConfig(env: unknown): RingboltConfig {
   }
 
   const config = parsed.data;
-  if (config.CALLE_MODE === "live" && config.CALLE_API_KEY === undefined) {
-    throw new ConfigurationError([
-      "CALLE_MODE is live but CALLE_API_KEY is not set",
-    ]);
+  if (config.CALLE_MODE === "live") {
+    if (!LIVE_MODE_AVAILABLE) {
+      throw new ConfigurationError([
+        "CALLE_MODE is live but this build has no CALL-E adapter, so no call can be placed. Set CALLE_MODE=fake.",
+      ]);
+    }
+    if (config.CALLE_API_KEY === undefined) {
+      throw new ConfigurationError([
+        "CALLE_MODE is live but CALLE_API_KEY is not set",
+      ]);
+    }
   }
 
   return config;

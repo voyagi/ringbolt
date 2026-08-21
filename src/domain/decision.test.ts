@@ -5,19 +5,31 @@ import {
   authorize,
 } from "./decision.js";
 
-const base: AuthorizationInput = {
+const offered = [
+  { id: "kill_switch" },
+  { id: "rollback", confirmationPhrase: "roll it back" },
+];
+
+const base: AuthorizationInput<(typeof offered)[number]> = {
   callStatus: "completed",
   taskCompleted: true,
   confidenceScore: 0.95,
   structuredResult: { decision: "run_action", action_id: "kill_switch" },
-  offeredActionIds: ["kill_switch", "rollback"],
-  confirmationPhrases: { rollback: "roll it back" },
+  offered,
 };
 
 describe("authorize", () => {
   it("lets a clean decision through", () => {
     const result = authorize(base);
-    expect(result).toMatchObject({ authorized: true, actionId: "kill_switch" });
+    expect(result).toMatchObject({
+      authorized: true,
+      action: { id: "kill_switch" },
+    });
+  });
+
+  it("returns the offered action itself, not a name to look up again", () => {
+    const result = authorize(base);
+    expect(result.authorized && result.action).toBe(offered[0]);
   });
 
   it("refuses a call that did not complete", () => {
@@ -42,6 +54,15 @@ describe("authorize", () => {
       authorized: false,
       refusal: "confidence_below_floor",
     });
+  });
+
+  it("refuses a confidence that is not a real number in range", () => {
+    for (const score of [Number.NaN, Infinity, -Infinity, 1.5, -0.2]) {
+      expect(authorize({ ...base, confidenceScore: score })).toMatchObject({
+        authorized: false,
+        refusal: "confidence_below_floor",
+      });
+    }
   });
 
   it("refuses just below the floor and allows exactly at it", () => {
@@ -83,6 +104,28 @@ describe("authorize", () => {
     expect(result).toMatchObject({
       authorized: false,
       refusal: "not_an_action_decision",
+    });
+  });
+
+  it("carries escalate and snooze back so a caller can tell them apart", () => {
+    const escalate = authorize({
+      ...base,
+      structuredResult: { decision: "escalate", reason: "not my system" },
+    });
+    expect(escalate).toMatchObject({
+      authorized: false,
+      refusal: "not_an_action_decision",
+      decision: { decision: "escalate" },
+    });
+
+    const snooze = authorize({
+      ...base,
+      structuredResult: { decision: "snooze", snooze_minutes: 30 },
+    });
+    expect(snooze).toMatchObject({
+      authorized: false,
+      refusal: "not_an_action_decision",
+      decision: { decision: "snooze", snooze_minutes: 30 },
     });
   });
 
@@ -146,7 +189,22 @@ describe("authorize", () => {
         confirmation_phrase: "  Roll it, back. ",
       },
     });
-    expect(result).toMatchObject({ authorized: true, actionId: "rollback" });
+    expect(result).toMatchObject({
+      authorized: true,
+      action: { id: "rollback" },
+    });
+  });
+
+  it("refuses an action the caller narrowed out of the offered set", () => {
+    const result = authorize({
+      ...base,
+      offered: [{ id: "rollback", confirmationPhrase: "roll it back" }],
+      structuredResult: { decision: "run_action", action_id: "kill_switch" },
+    });
+    expect(result).toMatchObject({
+      authorized: false,
+      refusal: "action_not_offered",
+    });
   });
 
   it("does not accept a confirmation that merely contains the phrase", () => {
