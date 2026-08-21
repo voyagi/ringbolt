@@ -52,6 +52,12 @@ requested schema, the named action was actually offered on that call, and, for a
 destructive, the responder said the confirmation phrase. Any one of those failing is a refusal
 with a reason, recorded, not an error swallowed.
 
+One honest limit on that floor, worth stating rather than leaving implied. The confidence number
+CALL-E returns is its confidence that the task was completed, not its confidence in the specific
+decision it extracted. So the floor filters calls that went badly, and it does not measure how
+sure the transcription is about the word the responder actually said. The schema check, the
+offered-action check and the spoken confirmation phrase are what guard the decision itself.
+
 ## Running it
 
 ```bash

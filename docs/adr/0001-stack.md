@@ -51,11 +51,29 @@ the login to justify server rendering.
 
 ### Cloudflare Workers with Durable Objects and D1 (chosen)
 
-Durable Objects are the exact primitive properties 3 and 4 describe. One Durable Object per
-incident is a single-threaded actor that owns that incident's state machine, so concurrent webhooks
-serialize against one owner instead of racing rows. Its `alarm` API is a durable timer that fires
-at a specific time, survives restarts, and needs no sweeper. It can hold the dashboard's WebSocket
-connections and push state as the call progresses.
+Durable Objects give property 3 outright and property 4 conditionally. One Durable Object per
+incident is a single-threaded actor that owns that incident's state machine. Its `alarm` API is a
+durable timer that fires at a specific time, survives restarts, and needs no sweeper. It can hold
+the dashboard's WebSocket connections and push state as the call progresses.
+
+**Correction, 2026-08-21, recorded in place rather than edited away, because the original claim is
+what the stack choice was argued on.** This paragraph first said that concurrent webhooks
+"serialize against one owner instead of racing rows", full stop. That overstates the guarantee and
+a review caught it. Cloudflare's documented behaviour is narrower: the input gate defers incoming
+events while one of the object's **own storage** operations is in flight, and awaiting anything
+else opens the gate so new events interleave. Their guidance is explicit that once you await,
+other events can interleave, and that `blockConcurrencyWhile()` is the tool for a critical section
+that awaits an external call.
+
+Ringbolt's object awaits D1 and the call provider, never `ctx.storage`, so today it gets no
+automatic serialization at all. The single-owner property is still available and is still the
+reason to be here, but it has to be taken deliberately: hold the read-then-write critical sections
+inside `blockConcurrencyWhile()`, or move live incident state into the object's own SQLite storage
+so the gate applies, or add a uniqueness constraint in D1 as a backstop. Until one of those is
+done, two terminal deliveries for the same incident can both pass the state check and run an
+action twice, which on this product means a production change applied twice.
+
+This is tracked as the first correctness item of phase 2 and is not fixed as of this writing.
 
 Verified on Cloudflare's own documentation on 2026-08-21, because the free tier is load-bearing
 here: Durable Objects are available on the Workers free plan with the SQLite storage backend, and
