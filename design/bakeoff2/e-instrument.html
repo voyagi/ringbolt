@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ringbolt, direction E</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=Chivo+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --deck: #0d1420;
+        --panel: #141d2c;
+        --edge: #23314a;
+        --text: #e8eef8;
+        --dim: #8695ad;
+        --live: #ff3d71;
+        --cyan: #22d3ee;
+        --amber: #ffb020;
+        --green: #29e08a;
+        --violet: #a78bfa;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--deck);
+        color: var(--text);
+        font-family: "Sora", sans-serif;
+        font-size: 14px;
+      }
+      .mono {
+        font-family: "Chivo Mono", monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        padding: 14px 24px;
+        border-bottom: 1px solid var(--edge);
+      }
+      .mark {
+        font-size: 19px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .mark span {
+        color: var(--live);
+      }
+      nav {
+        display: flex;
+        gap: 22px;
+        font-size: 13px;
+      }
+      nav a {
+        color: var(--dim);
+        text-decoration: none;
+      }
+      nav a.on {
+        color: var(--text);
+      }
+      header .right {
+        margin-left: auto;
+        display: flex;
+        gap: 24px;
+        align-items: center;
+        font-size: 12px;
+        color: var(--dim);
+      }
+      header .right b {
+        color: var(--text);
+      }
+
+      /* An instrument cluster: one primary dial, secondary readouts around it. No table anywhere. */
+      .cluster {
+        display: grid;
+        grid-template-columns: 380px 1fr 260px;
+        gap: 1px;
+        background: var(--edge);
+      }
+      .cluster > section {
+        background: var(--deck);
+        padding: 22px 24px;
+      }
+
+      .dial {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+      }
+      .dial .svcname {
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        align-self: flex-start;
+      }
+      .dial .why {
+        font-size: 13px;
+        color: var(--dim);
+        align-self: flex-start;
+        margin-bottom: 10px;
+      }
+      .gauge {
+        position: relative;
+        width: 260px;
+        height: 260px;
+      }
+      .gauge svg {
+        transform: rotate(-90deg);
+      }
+      .gauge .mid {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      .gauge .mid .st {
+        font-size: 10px;
+        letter-spacing: 0.22em;
+        color: var(--live);
+      }
+      .gauge .mid .n {
+        font-family: "Chivo Mono", monospace;
+        font-size: 46px;
+        font-weight: 700;
+        line-height: 1;
+        margin: 6px 0 2px;
+      }
+      .gauge .mid .sub {
+        font-size: 11px;
+        color: var(--dim);
+      }
+      .dial .who {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-top: 12px;
+        font-size: 13px;
+      }
+      .dial .who i {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--live);
+        display: block;
+      }
+
+      .readout h3 {
+        margin: 0 0 12px;
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        color: var(--dim);
+        font-weight: 600;
+      }
+      .wave {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        height: 54px;
+        margin-bottom: 16px;
+      }
+      .wave i {
+        flex: 1;
+        display: block;
+        border-radius: 1px;
+        background: var(--cyan);
+        opacity: 0.85;
+      }
+      .wave i.them {
+        background: var(--text);
+      }
+      .wave i.hit {
+        background: var(--live);
+        opacity: 1;
+      }
+      .say {
+        display: grid;
+        grid-template-columns: 52px 1fr;
+        gap: 12px;
+        padding: 7px 0;
+        border-bottom: 1px solid var(--edge);
+        font-size: 14px;
+      }
+      .say .t {
+        color: var(--dim);
+        font-size: 11px;
+        padding-top: 3px;
+      }
+      .say.bot {
+        color: var(--cyan);
+      }
+      .say.hit b {
+        color: var(--live);
+        border-bottom: 2px solid var(--live);
+      }
+
+      .docket {
+        margin-top: 16px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1px;
+        background: var(--edge);
+        border: 1px solid var(--edge);
+      }
+      .docket div {
+        background: var(--panel);
+        padding: 11px 13px;
+      }
+      .docket dt {
+        font-size: 9px;
+        letter-spacing: 0.16em;
+        color: var(--dim);
+      }
+      .docket dd {
+        margin: 5px 0 0;
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .side h3 {
+        margin: 0 0 12px;
+        font-size: 10px;
+        letter-spacing: 0.2em;
+        color: var(--dim);
+        font-weight: 600;
+      }
+      .unit {
+        border-left: 3px solid var(--edge);
+        padding: 10px 0 12px 12px;
+        margin-bottom: 12px;
+      }
+      .unit .s {
+        font-weight: 600;
+        font-size: 15px;
+      }
+      .unit .d {
+        font-size: 12px;
+        color: var(--dim);
+        margin: 2px 0 8px;
+      }
+      .unit .m {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        letter-spacing: 0.08em;
+      }
+      .track {
+        height: 4px;
+        background: var(--edge);
+        border-radius: 3px;
+        margin-top: 8px;
+        position: relative;
+        overflow: hidden;
+      }
+      .track i {
+        position: absolute;
+        inset: 0 auto 0 0;
+        display: block;
+      }
+
+      footer {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        border-top: 1px solid var(--edge);
+      }
+      footer div {
+        padding: 11px 24px;
+        border-right: 1px solid var(--edge);
+      }
+      footer dt {
+        font-size: 9px;
+        letter-spacing: 0.16em;
+        color: var(--dim);
+      }
+      footer dd {
+        margin: 4px 0 0;
+        font-size: 17px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="mark">ring<span>bolt</span></div>
+      <nav>
+        <a class="on" href="#">Deck</a><a href="#">Incidents</a
+        ><a href="#">Runbooks</a><a href="#">Rota</a>
+      </nav>
+      <div class="right">
+        <span>on call <b>Nadia</b></span
+        ><span class="mono">03:14:22</span>
+      </div>
+    </header>
+
+    <div class="cluster">
+      <section class="dial">
+        <div class="svcname">checkout</div>
+        <div class="why">Payment errors above 20 percent</div>
+        <div class="gauge">
+          <svg width="260" height="260" viewBox="0 0 260 260">
+            <circle
+              cx="130"
+              cy="130"
+              r="112"
+              fill="none"
+              stroke="#23314a"
+              stroke-width="16"
+            />
+            <circle
+              cx="130"
+              cy="130"
+              r="112"
+              fill="none"
+              stroke="#ff3d71"
+              stroke-width="16"
+              stroke-linecap="round"
+              stroke-dasharray="704"
+              stroke-dashoffset="176"
+            />
+            <circle
+              cx="130"
+              cy="130"
+              r="88"
+              fill="none"
+              stroke="#23314a"
+              stroke-width="4"
+            />
+            <circle
+              cx="130"
+              cy="130"
+              r="88"
+              fill="none"
+              stroke="#22d3ee"
+              stroke-width="4"
+              stroke-linecap="round"
+              stroke-dasharray="553"
+              stroke-dashoffset="415"
+            />
+          </svg>
+          <div class="mid">
+            <div class="st">ON THE LINE</div>
+            <div class="n">00:41</div>
+            <div class="sub">answered on ring 2</div>
+          </div>
+        </div>
+        <div class="who"><i></i>Nadia &middot; primary</div>
+      </section>
+
+      <section class="readout">
+        <h3>CALL</h3>
+        <div class="wave">
+          <i style="height: 24%"></i><i style="height: 54%"></i
+          ><i style="height: 78%"></i><i style="height: 58%"></i
+          ><i style="height: 88%"></i><i style="height: 40%"></i
+          ><i style="height: 28%"></i> <i class="them" style="height: 18%"></i
+          ><i class="them" style="height: 56%"></i
+          ><i class="them" style="height: 72%"></i
+          ><i class="them" style="height: 36%"></i> <i style="height: 32%"></i
+          ><i style="height: 66%"></i><i style="height: 48%"></i
+          ><i style="height: 20%"></i> <i class="them" style="height: 26%"></i
+          ><i class="them" style="height: 44%"></i>
+          <i class="hit" style="height: 92%"></i
+          ><i class="hit" style="height: 100%"></i
+          ><i class="hit" style="height: 78%"></i> <i style="height: 13%"></i
+          ><i style="height: 8%"></i>
+        </div>
+        <div class="say bot">
+          <span class="t mono">00:04</span
+          ><span
+            >Payment errors went from nought point two to twenty three percent,
+            right after a deploy.</span
+          >
+        </div>
+        <div class="say">
+          <span class="t mono">00:11</span
+          ><span>Is anything else touching payments?</span>
+        </div>
+        <div class="say bot">
+          <span class="t mono">00:13</span
+          ><span>No. Search and accounts are both clean.</span>
+        </div>
+        <div class="say hit">
+          <span class="t mono">00:19</span
+          ><span>Right. <b>Roll it back.</b></span>
+        </div>
+
+        <dl class="docket">
+          <div>
+            <dt>ACTION</dt>
+            <dd style="color: var(--live)">rollback</dd>
+          </div>
+          <div>
+            <dt>AUTHORITY</dt>
+            <dd>spoken</dd>
+          </div>
+          <div>
+            <dt>CONFIDENCE</dt>
+            <dd class="mono">0.94</dd>
+          </div>
+          <div>
+            <dt>RESULT</dt>
+            <dd style="color: var(--green)">restored</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="side">
+        <h3>STANDING</h3>
+        <div class="unit" style="border-left-color: var(--violet)">
+          <div class="s">search</div>
+          <div class="d">Latency above 5 s, p99</div>
+          <div class="m">
+            <span>CALLING</span><span class="mono">00:40</span>
+          </div>
+          <div class="track">
+            <i style="width: 64%; background: var(--violet)"></i>
+          </div>
+        </div>
+        <div class="unit" style="border-left-color: var(--amber)">
+          <div class="s">mailer</div>
+          <div class="d">Queue depth 12,400</div>
+          <div class="m">
+            <span>NO ANSWER</span><span class="mono">NEXT IVO</span>
+          </div>
+          <div class="track">
+            <i style="width: 22%; background: var(--amber)"></i>
+          </div>
+        </div>
+        <div class="unit" style="border-left-color: var(--green)">
+          <div class="s">imports</div>
+          <div class="d">Nightly job failed twice</div>
+          <div class="m"><span>HELD</span><span class="mono">01:52</span></div>
+          <div class="track">
+            <i style="width: 100%; background: var(--green)"></i>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <footer>
+      <div>
+        <dt>OPEN</dt>
+        <dd class="mono">4</dd>
+      </div>
+      <div>
+        <dt>ON THE LINE</dt>
+        <dd class="mono">1</dd>
+      </div>
+      <div>
+        <dt>ACTED TODAY</dt>
+        <dd class="mono">7</dd>
+      </div>
+      <div>
+        <dt>REFUSED TODAY</dt>
+        <dd class="mono">2</dd>
+      </div>
+      <div>
+        <dt>CALL BUDGET</dt>
+        <dd class="mono">3 / 20</dd>
+      </div>
+    </footer>
+  </body>
+</html>

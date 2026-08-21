@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ringbolt, direction D</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Anton&family=Instrument+Sans:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --field: #1b2ff0;
+        --field-deep: #0a1ac2;
+        --paper: #fdfcf7;
+        --ink: #0a0c1a;
+        --flare: #ff4d17;
+        --lime: #c8ff2e;
+        --sky: #7ad4ff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--field);
+        color: var(--paper);
+        font-family: "Instrument Sans", sans-serif;
+        font-size: 15px;
+      }
+      .huge {
+        font-family: "Anton", sans-serif;
+        font-weight: 400;
+        text-transform: uppercase;
+        letter-spacing: 0.005em;
+        line-height: 0.86;
+      }
+      .mono {
+        font-family: "DM Mono", monospace;
+        font-variant-numeric: tabular-nums;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        gap: 22px;
+        padding: 16px 26px 14px;
+      }
+      .mark {
+        font-size: 27px;
+      }
+      .mark span {
+        color: var(--lime);
+      }
+      nav {
+        display: flex;
+        gap: 4px;
+        margin-left: 12px;
+      }
+      nav a {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: rgba(253, 252, 247, 0.6);
+        text-decoration: none;
+        padding: 7px 12px;
+      }
+      nav a.on {
+        background: var(--paper);
+        color: var(--field);
+      }
+      header .right {
+        margin-left: auto;
+        text-align: right;
+        font-size: 12px;
+        color: rgba(253, 252, 247, 0.75);
+      }
+      header .right b {
+        display: block;
+        font-size: 24px;
+        color: var(--paper);
+      }
+
+      /* One stage, one story. Everything that is not the live call is demoted to the ticker. */
+      .stage {
+        padding: 0 26px 22px;
+      }
+      .headline {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 30px;
+        align-items: end;
+        padding-bottom: 16px;
+      }
+      .headline .kicker {
+        display: inline-block;
+        background: var(--flare);
+        color: var(--paper);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        padding: 6px 12px;
+        margin-bottom: 12px;
+      }
+      .headline h1 {
+        margin: 0;
+        font-size: 78px;
+      }
+      .headline h1 em {
+        font-style: normal;
+        color: var(--lime);
+      }
+      .headline .why {
+        margin: 10px 0 0;
+        font-size: 18px;
+        color: rgba(253, 252, 247, 0.85);
+        max-width: 620px;
+      }
+      .clock {
+        text-align: right;
+      }
+      .clock .n {
+        font-family: "Anton", sans-serif;
+        font-size: 72px;
+        line-height: 0.82;
+        color: var(--lime);
+      }
+      .clock .l {
+        font-size: 11px;
+        letter-spacing: 0.2em;
+        color: rgba(253, 252, 247, 0.7);
+      }
+
+      .lower {
+        display: grid;
+        grid-template-columns: 1fr 340px;
+        gap: 3px;
+      }
+      .transcript {
+        background: var(--paper);
+        color: var(--ink);
+        padding: 20px 24px;
+      }
+      .wave {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        height: 62px;
+        margin-bottom: 16px;
+      }
+      .wave i {
+        flex: 1;
+        display: block;
+        border-radius: 2px;
+        background: var(--field);
+      }
+      .wave i.them {
+        background: var(--ink);
+      }
+      .wave i.hit {
+        background: var(--flare);
+      }
+      .line {
+        display: grid;
+        grid-template-columns: 62px 1fr;
+        gap: 14px;
+        padding: 8px 0;
+        font-size: 16px;
+      }
+      .line .t {
+        font-size: 12px;
+        color: #7a7f90;
+        padding-top: 3px;
+      }
+      .line.bot {
+        color: var(--field-deep);
+      }
+      .line.hit b {
+        background: var(--flare);
+        color: var(--paper);
+        padding: 2px 8px;
+      }
+
+      .call-out {
+        background: var(--ink);
+        padding: 20px 22px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .call-out .lab {
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        color: rgba(253, 252, 247, 0.55);
+      }
+      .call-out .act {
+        font-family: "Anton", sans-serif;
+        font-size: 46px;
+        text-transform: uppercase;
+        line-height: 0.9;
+        color: var(--lime);
+      }
+      .call-out dl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 7px 14px;
+        font-size: 13px;
+      }
+      .call-out dt {
+        color: rgba(253, 252, 247, 0.55);
+      }
+      .call-out dd {
+        margin: 0;
+        text-align: right;
+      }
+      .call-out .stamp {
+        background: var(--lime);
+        color: var(--ink);
+        font-weight: 700;
+        text-align: center;
+        padding: 11px;
+        font-size: 14px;
+      }
+
+      .ticker {
+        background: var(--ink);
+        border-top: 3px solid var(--flare);
+        display: flex;
+        align-items: stretch;
+      }
+      .ticker .lab {
+        background: var(--flare);
+        color: var(--paper);
+        font-family: "Anton", sans-serif;
+        font-size: 19px;
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        padding: 0 18px;
+        letter-spacing: 0.04em;
+      }
+      .ticker .items {
+        display: flex;
+        flex: 1;
+      }
+      .ticker .it {
+        flex: 1;
+        padding: 13px 20px;
+        border-right: 1px solid rgba(253, 252, 247, 0.14);
+      }
+      .ticker .it .s {
+        font-weight: 700;
+        font-size: 16px;
+      }
+      .ticker .it .d {
+        font-size: 12px;
+        color: rgba(253, 252, 247, 0.62);
+        margin-top: 2px;
+      }
+      .ticker .it .st {
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        margin-top: 7px;
+        display: inline-block;
+        padding: 3px 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="mark huge">Ring<span>bolt</span></div>
+      <nav>
+        <a class="on" href="#">Live</a><a href="#">History</a
+        ><a href="#">Runbooks</a><a href="#">Rota</a>
+      </nav>
+      <div class="right">ON CALL<b>Nadia</b></div>
+    </header>
+
+    <section class="stage">
+      <div class="headline">
+        <div>
+          <span class="kicker">LINE OPEN &middot; CHECKOUT</span>
+          <h1 class="huge">Payment errors<br /><em>at 23 percent</em></h1>
+          <p class="why">
+            Up from nought point two, two minutes after deploy 2026.08.19-c.
+            Nadia picked up on the second ring.
+          </p>
+        </div>
+        <div class="clock">
+          <div class="n mono">00:41</div>
+          <div class="l">ON THE LINE</div>
+        </div>
+      </div>
+
+      <div class="lower">
+        <div class="transcript">
+          <div class="wave">
+            <i style="height: 26%"></i><i style="height: 58%"></i
+            ><i style="height: 84%"></i><i style="height: 62%"></i
+            ><i style="height: 92%"></i><i style="height: 44%"></i
+            ><i style="height: 30%"></i> <i class="them" style="height: 20%"></i
+            ><i class="them" style="height: 60%"></i
+            ><i class="them" style="height: 78%"></i
+            ><i class="them" style="height: 38%"></i> <i style="height: 34%"></i
+            ><i style="height: 70%"></i><i style="height: 50%"></i
+            ><i style="height: 22%"></i> <i class="them" style="height: 28%"></i
+            ><i class="them" style="height: 46%"></i>
+            <i class="hit" style="height: 96%"></i
+            ><i class="hit" style="height: 100%"></i
+            ><i class="hit" style="height: 82%"></i> <i style="height: 14%"></i
+            ><i style="height: 9%"></i><i style="height: 6%"></i>
+          </div>
+          <div class="line bot">
+            <span class="t mono">00:04</span
+            ><span
+              >Payment errors went from nought point two to twenty three
+              percent, right after a deploy.</span
+            >
+          </div>
+          <div class="line">
+            <span class="t mono">00:11</span
+            ><span>Is anything else touching payments?</span>
+          </div>
+          <div class="line bot">
+            <span class="t mono">00:13</span
+            ><span>No. Search and accounts are both clean.</span>
+          </div>
+          <div class="line hit">
+            <span class="t mono">00:19</span
+            ><span>Right. <b>Roll it back.</b></span>
+          </div>
+        </div>
+
+        <div class="call-out">
+          <div>
+            <div class="lab">SHE AUTHORIZED</div>
+            <div class="act">Rollback</div>
+          </div>
+          <dl>
+            <dt>heard</dt>
+            <dd>"roll it back"</dd>
+            <dt>confidence</dt>
+            <dd class="mono">0.94</dd>
+            <dt>stages</dt>
+            <dd class="mono">4 of 4</dd>
+            <dt>ran at</dt>
+            <dd class="mono">14:04:53</dd>
+          </dl>
+          <div class="stamp">2026.08.19-b RESTORED</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="ticker">
+      <div class="lab">Standing</div>
+      <div class="items">
+        <div class="it">
+          <div class="s">search</div>
+          <div class="d">Latency above 5 seconds, p99</div>
+          <span class="st" style="background: var(--flare); color: var(--paper)"
+            >CALLING IN 40s</span
+          >
+        </div>
+        <div class="it">
+          <div class="s">mailer</div>
+          <div class="d">Queue depth 12,400 and climbing</div>
+          <span class="st" style="background: var(--sky); color: var(--ink)"
+            >NO ANSWER, NEXT IVO</span
+          >
+        </div>
+        <div class="it">
+          <div class="s">imports</div>
+          <div class="d">Nightly job failed twice</div>
+          <span class="st" style="background: var(--lime); color: var(--ink)"
+            >HELD, KILL SWITCH ON</span
+          >
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
