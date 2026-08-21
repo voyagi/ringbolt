@@ -37,6 +37,14 @@ Flag meanings verified 2026-08-21 against the International Code of Signals as d
 Wikipedia's international maritime signal flags article. The five colours of the system are black,
 blue, red, yellow, and white.
 
+**Correction, same day.** The eight meanings above were checked. The flag GEOMETRY was not, and one
+was drawn wrong: MIKE shipped as a white rectangle on blue when it is a white saltire, a diagonal
+cross reaching all four corners, on blue. Fixed in the mockup and re-rendered. Recording it because
+this document rests its whole real-media argument on accurate reproduction, and because the failure
+is the ordinary one: a verified claim standing next to an unverified one made the second look
+checked. Every flag drawn from here on gets its geometry verified individually, not inherited from
+the fact that its meaning was.
+
 ## Type
 
 Self-host all three as WOFF2. No runtime dependency on a font CDN.

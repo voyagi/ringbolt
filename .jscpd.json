@@ -17,6 +17,7 @@
     "**/docs/**",
     "**/package-lock.json",
     "**/*.lock",
-    "**/worker-configuration.d.ts"
+    "**/worker-configuration.d.ts",
+    "**/design/**"
   ]
 }
