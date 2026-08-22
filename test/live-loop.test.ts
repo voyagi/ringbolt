@@ -135,6 +135,22 @@ describe("the loop running on the CALL-E adapter", () => {
     expect(await repo.getServiceState("checkout")).toBeNull();
   });
 
+  /**
+   * CALL-E validates the task before it will create one, and it rejected the first real attempt
+   * with "who should the bot say is calling in the opening sentence?". The instruction said to say
+   * who was calling without ever saying who that was. Nothing was dialled and nothing was spent,
+   * but the rejection cost a go-live attempt, so the caller's name is pinned here.
+   */
+  it("tells the caller who to say they are", async () => {
+    const api = calleApiStub();
+    await liveOrchestrator(api).open(alert);
+
+    const task = api.creates[0]?.body["task"];
+    expect(typeof task).toBe("string");
+    expect(task).toContain("Ringbolt");
+    expect(task).toContain("names you as Ringbolt");
+  });
+
   /** A real call is dialled at the configured number, and the API is told to call that number. */
   it("dials the configured number and nothing else", async () => {
     const api = calleApiStub();
