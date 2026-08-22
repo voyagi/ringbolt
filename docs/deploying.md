@@ -22,12 +22,13 @@ npm run db:migrate:remote
 
 Three values are plain configuration and live in `wrangler.jsonc` under `vars`:
 
-| Name                  | What it does                                                                                 |
-| --------------------- | -------------------------------------------------------------------------------------------- |
-| `RINGBOLT_ENV`        | `development`, `preview`, or `production`. Outside development, an intake token is required. |
-| `PUBLIC_BASE_URL`     | The deployed URL. CALL-E sends its webhooks here, so it has to be the real one.              |
-| `CALLE_MODE`          | `fake` dials nothing. `live` places real calls. See below.                                   |
-| `LIVE_CALL_ALLOWLIST` | Every number a live build may ring, comma separated. `DEMO_PHONE` is always included.        |
+| Name                    | What it does                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------------- |
+| `RINGBOLT_ENV`          | `development`, `preview`, or `production`. Outside development, an intake token is required.  |
+| `PUBLIC_BASE_URL`       | The deployed URL. CALL-E sends its webhooks here, so it has to be the real one.               |
+| `CALLE_MODE`            | `fake` dials nothing. `live` places real calls. See below.                                    |
+| `LIVE_CALL_ALLOWLIST`   | Every number a live build may ring, comma separated. `DEMO_PHONE` is always included.         |
+| `ACTION_HOST_ALLOWLIST` | Every host a runbook action may call, comma separated. Outside development, empty means none. |
 
 The rest are secrets, set with `wrangler secret put` and never written to a file in this repository:
 
@@ -35,6 +36,7 @@ The rest are secrets, set with `wrangler secret put` and never written to a file
 wrangler secret put INTAKE_TOKEN    # any long random string, used in the intake URL
 wrangler secret put ADMIN_TOKEN     # any long random string, guards /api/config
 wrangler secret put DEMO_PHONE      # the number Ringbolt calls, in E.164, live mode only
+wrangler secret put RUNBOOK_SECRET_DEPLOY   # one per system an action may change, see below
 ```
 
 A cron trigger runs once a minute and is declared in `wrangler.jsonc`, so `wrangler deploy` sets it
@@ -86,6 +88,48 @@ with no rotation at all `DEMO_PHONE` is who gets called. `GET /api/config/action
 ids a policy may name; a policy naming one this build does not have is refused rather than quietly
 narrowing what a responder is offered.
 
+## What may be carried out on a call
+
+An action is a row rather than a function, so adding one is a request and not a deploy. The two the
+product ships with change state Ringbolt owns; anything that reaches your own systems is written
+down here.
+
+```bash
+curl -X PUT https://your-worker-url/api/config/actions/restart_workers \
+  -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \
+  -d '{"label":"Restart the workers",
+       "spokenDescription":"restart the workers, which drops every job in flight",
+       "confirmationPhrase":"restart the workers",
+       "minConfidence":0.85,
+       "parameters":[{"name":"reason","description":"why, in their own words","type":"string"}],
+       "target":{"kind":"http","method":"POST",
+                 "url":"https://deploy.harbourworks.net/checkout/restart",
+                 "headers":{"x-api-key":{"fromSecret":"RUNBOOK_SECRET_DEPLOY"}},
+                 "body":{"reason":"{reason}"}},
+       "verify":{"url":"https://deploy.harbourworks.net/checkout/health",
+                 "jsonPath":["status","healthy"],"equals":true}}'
+```
+
+| Field                | What it does                                                                                   |
+| -------------------- | ---------------------------------------------------------------------------------------------- |
+| `spokenDescription`  | Read out on the call, so it is a sentence a person can answer rather than a function name.     |
+| `confirmationPhrase` | The exact words that have to be said back. Leave it null for anything not destructive.         |
+| `minConfidence`      | A floor of its own, above the product-wide one, for an action that deserves more certainty.    |
+| `parameters`         | Values the responder can give out loud, each with a type that is checked before anything runs. |
+| `target`             | `service_state` for state Ringbolt owns, or `http` for a request to one of your systems.       |
+| `verify`             | A read of the system afterwards. Without one, nothing confirms the change took effect.         |
+
+Three rules are worth knowing before writing one. A credential goes in a `RUNBOOK_SECRET_*` binding
+and is named by the definition, never typed into it, because this endpoint can read definitions
+back. The host has to be in `ACTION_HOST_ALLOWLIST` or the request is refused before it is sent.
+And an action that is retried has to say `"idempotent": true`, because a request that never came
+back may have been carried out anyway.
+
+An action whose `verify` disagrees with it is recorded as `unverified`, and an unverified action
+does not resolve the incident. `GET /api/audit/incidents/{id}` returns the whole record: the
+transcript, the decision, who authorized it, the values they gave, and the system either side of
+the change. It carries personal data, so it is behind `ADMIN_TOKEN` like the rest.
+
 ## Deploy
 
 ```bash
@@ -126,7 +170,7 @@ wrangler secret put CALLE_API_KEY   # from https://dashboard.heycall-e.com/accou
 wrangler secret put DEMO_PHONE      # E.164, for example +31612345678
 ```
 
-Then set `CALLE_MODE` to `live` in `wrangler.jsonc` and deploy. Four things have to be true before a
+Then set `CALLE_MODE` to `live` in `wrangler.jsonc` and deploy. Five things have to be true before a
 call can happen, and each is refused separately rather than failing at the moment a phone should
 ring:
 
