@@ -8,6 +8,7 @@
 const TABLES = [
   "incident_events",
   "action_runs",
+  "call_records",
   "processed_events",
   "call_ledger",
   "rotation",
@@ -18,8 +19,21 @@ const TABLES = [
   "fake_calls",
 ] as const;
 
+/**
+ * Action definitions are configuration rather than data: migration 0005 seeds the two the product
+ * ships with, and a fresh install is supposed to have them. So a reset removes what a test added
+ * and leaves the seed alone, rather than emptying the table and giving every later test an install
+ * that can offer nothing at all.
+ */
+const SEEDED_ACTIONS = "'kill_switch', 'rollback'";
+
 export async function resetTables(db: D1Database): Promise<void> {
   for (const table of TABLES) {
     await db.prepare(`DELETE FROM ${table}`).run();
   }
+  await db
+    .prepare(
+      `DELETE FROM action_definitions WHERE id NOT IN (${SEEDED_ACTIONS})`,
+    )
+    .run();
 }

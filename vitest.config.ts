@@ -28,6 +28,10 @@ export default defineConfig({
           // The stand-in's think time only exists so a demo looks like a real call.
           CALLE_FAKE_DELAY_MS: "20",
           INTAKE_TOKEN: "test-intake-token-0123456789",
+          // The same idea one layer out. A runbook action is a row in a table, and a test can write
+          // one, so the suite pins the only host any action it defines is allowed to reach. That
+          // name does not resolve, so an action stored by a test cannot touch anybody's system.
+          ACTION_HOST_ALLOWLIST: "actions.ringbolt.test",
         },
       },
     }),

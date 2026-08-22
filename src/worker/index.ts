@@ -1,11 +1,17 @@
-import { type Context, Hono } from "hono";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
 import {
   callIdFromDelivery,
   eventIdFromDelivery,
   verifyCall,
 } from "../calle/verify.js";
 import { REAL_CALL_ALLOWANCE, isTerminalCall } from "../calle/port.js";
-import { allActionIds, describeActions } from "../actions/registry.js";
+import {
+  type ActionDefinition,
+  type ActionDefinitionInput,
+  actionDefinitionInput,
+  actionHost,
+  actionIdPattern,
+} from "../actions/definition.js";
 import { Repo, SHARED_ROTATION } from "../db/repo.js";
 import {
   type Incident,
@@ -23,6 +29,7 @@ import {
   ConfigurationError,
   type Bindings,
   type RingboltConfig,
+  allowedActionHosts,
   readConfig,
 } from "./env.js";
 import { incidentStub } from "./incident-client.js";
@@ -193,15 +200,106 @@ app.get("/api/services/:service/state", async (c) => {
  * The subtree is guarded in one place rather than route by route on purpose. A guard repeated at
  * nine handlers is a guard that will eventually be missing from the tenth.
  */
-app.use("/api/config/*", async (c, next) => {
+const adminOnly: MiddlewareHandler<{ Bindings: Bindings }> = async (
+  c,
+  next,
+) => {
   const config = readConfig(c.env);
   const refusal = adminRefusal(c, config);
   if (refusal !== null) return refusal;
   await next();
   return undefined;
+};
+
+app.use("/api/config/*", adminOnly);
+
+// The audit trail carries the call transcript, which is personal data and is also the evidence
+// behind a production change. Neither belongs on the open read API.
+app.use("/api/audit/*", adminOnly);
+
+app.get("/api/config/actions", async (c) => {
+  const repo = new Repo(c.env.DB);
+  return c.json({
+    actions: await repo.listActionDefinitions(),
+    allowedHosts: allowedActionHosts(readConfig(c.env)),
+  });
 });
 
-app.get("/api/config/actions", (c) => c.json({ actions: describeActions() }));
+app.get("/api/config/actions/:id", async (c) => {
+  const action = await new Repo(c.env.DB).getActionDefinition(
+    c.req.param("id"),
+  );
+  if (action === null) return c.json({ error: "no such action" }, 404);
+  return c.json({ action });
+});
+
+/**
+ * Writing an action is writing what Ringbolt may do to a production system on somebody's spoken
+ * say-so, so everything that can be refused here is refused here, at a keyboard, rather than at
+ * three in the morning: the shape, the target's own rules, and the hosts this deployment may call.
+ */
+app.put("/api/config/actions/:id", async (c) => {
+  const id = c.req.param("id");
+  if (!actionIdPattern.test(id)) {
+    return c.json(
+      {
+        error:
+          "an action id is lower case letters, digits and underscores, three to forty characters",
+      },
+      422,
+    );
+  }
+
+  const parsed = actionDefinitionInput.safeParse(await readJson(c.req.raw));
+  if (!parsed.success) return unprocessable(c, parsed.error.issues);
+
+  const allowed = allowedActionHosts(readConfig(c.env));
+  const outside = hostsOutside(parsed.data, allowed);
+  if (outside.length > 0) {
+    return c.json(
+      {
+        error: `this deployment may not call ${outside.join(", ")}. Names it may call go in ACTION_HOST_ALLOWLIST.`,
+        allowedHosts: allowed,
+      },
+      422,
+    );
+  }
+
+  const repo = new Repo(c.env.DB);
+  const existing = await repo.getActionDefinition(id);
+  const at = new Date().toISOString();
+  const action: ActionDefinition = {
+    ...parsed.data,
+    id,
+    createdAt: existing?.createdAt ?? at,
+    updatedAt: at,
+  };
+  await repo.upsertActionDefinition(action);
+  return c.json({ action }, existing === null ? 201 : 200);
+});
+
+app.delete("/api/config/actions/:id", async (c) => {
+  const repo = new Repo(c.env.DB);
+  const id = c.req.param("id");
+  if ((await repo.getActionDefinition(id)) === null)
+    return c.json({ error: "no such action" }, 404);
+
+  // Removing an action a policy still permits would quietly shorten what that service can be
+  // offered on a call, which is discovered by a responder being told there is nothing to do.
+  const services = await repo.policiesPermitting(id);
+  if (services.length > 0) {
+    return c.json(
+      {
+        error: `${id} is still permitted for ${services.join(", ")}, so take it out of those policies first`,
+        services,
+      },
+      409,
+    );
+  }
+
+  await repo.deleteActionDefinition(id);
+  return c.json({ ok: true });
+});
 
 app.get("/api/config/services", async (c) => {
   const repo = new Repo(c.env.DB);
@@ -210,11 +308,10 @@ app.get("/api/config/services", async (c) => {
 
 app.get("/api/config/services/:service", async (c) => {
   const service = c.req.param("service");
-  const stored = await new Repo(c.env.DB).getServicePolicy(service);
+  const repo = new Repo(c.env.DB);
+  const stored = await repo.getServicePolicy(service);
   return c.json({
-    policy:
-      stored ??
-      defaultPolicy(service, allActionIds(), new Date().toISOString()),
+    policy: stored ?? (await defaultFor(repo, service)),
     configured: stored !== null,
   });
 });
@@ -223,13 +320,16 @@ app.put("/api/config/services/:service", async (c) => {
   const parsed = servicePolicyInput.safeParse(await readJson(c.req.raw));
   if (!parsed.success) return unprocessable(c, parsed.error.issues);
 
-  const known = new Set(allActionIds());
+  const defined = (await new Repo(c.env.DB).listActionDefinitions()).map(
+    (definition) => definition.id,
+  );
+  const known = new Set(defined);
   const unknown = parsed.data.allowedActions.filter((id) => !known.has(id));
   if (unknown.length > 0) {
     return c.json(
       {
-        error: `this build has no such action: ${unknown.join(", ")}`,
-        actions: allActionIds(),
+        error: `this install has no such action: ${unknown.join(", ")}`,
+        actions: defined,
       },
       422,
     );
@@ -326,6 +426,23 @@ app.put("/api/config/rotation/:service", async (c) => {
   return c.json({ service, contacts: await repo.rotationFor(service) });
 });
 
+/**
+ * One incident with everything that was decided about it: the timeline, what was said on each
+ * call, and every action that ran with the system state either side of it.
+ */
+app.get("/api/audit/incidents/:id", async (c) => {
+  const repo = new Repo(c.env.DB);
+  const incident = await repo.getIncident(c.req.param("id"));
+  if (incident === null) return c.json({ error: "no such incident" }, 404);
+
+  return c.json({
+    incident,
+    events: await repo.listEvents(incident.id),
+    calls: await repo.listCallRecords(incident.id),
+    actions: await repo.listActionRuns(incident.id),
+  });
+});
+
 app.get("/api/budget", async (c) => {
   const repo = new Repo(c.env.DB);
   const spent = await repo.countRealCalls();
@@ -356,6 +473,32 @@ function describeIssue(issue: {
   message: string;
 }): string {
   return `${issue.path.join(".") || "root"}: ${issue.message}`;
+}
+
+async function defaultFor(repo: Repo, service: string) {
+  const defined = await repo.listActionDefinitions();
+  return defaultPolicy(
+    service,
+    defined.map((definition) => definition.id),
+    new Date().toISOString(),
+  );
+}
+
+/** The hosts a definition would reach that this deployment has not been told it may reach. */
+function hostsOutside(
+  definition: ActionDefinitionInput,
+  allowed: readonly string[] | null,
+): string[] {
+  if (allowed === null) return [];
+
+  const templates = [
+    definition.target.kind === "http" ? definition.target.url : null,
+    definition.verify?.url ?? null,
+  ];
+  const hosts = templates
+    .map((template) => (template === null ? null : actionHost(template)))
+    .filter((host): host is string => host !== null);
+  return [...new Set(hosts.filter((host) => !allowed.includes(host)))];
 }
 
 function unprocessable(

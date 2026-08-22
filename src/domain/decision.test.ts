@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ActionParameter } from "../actions/definition.js";
 import {
   CONFIDENCE_FLOOR,
   type AuthorizationInput,
@@ -234,5 +235,105 @@ describe("authorize", () => {
       authorized: false,
       refusal: "call_not_completed",
     });
+  });
+});
+
+const scale: ActionParameter = {
+  name: "instances",
+  description: "how many to run",
+  type: "number",
+  required: true,
+  min: 1,
+  max: 10,
+};
+
+const withParameters = [
+  { id: "scale_out", parameters: [scale] },
+  { id: "wipe", confirmationPhrase: "wipe it", minConfidence: 0.95 },
+];
+
+const spoken: AuthorizationInput<(typeof withParameters)[number]> = {
+  callStatus: "completed",
+  taskCompleted: true,
+  confidenceScore: 0.9,
+  structuredResult: {
+    decision: "run_action",
+    action_id: "scale_out",
+    action_parameters: { instances: "6" },
+  },
+  offered: withParameters,
+};
+
+describe("authorizing the values an action was given", () => {
+  it("passes through what the responder said, read as the type it was declared as", () => {
+    const result = authorize(spoken);
+    expect(result).toMatchObject({
+      authorized: true,
+      parameters: { instances: 6 },
+    });
+  });
+
+  it("refuses a value the action would not accept", () => {
+    const result = authorize({
+      ...spoken,
+      structuredResult: {
+        decision: "run_action",
+        action_id: "scale_out",
+        action_parameters: { instances: "400" },
+      },
+    });
+    expect(result).toMatchObject({
+      authorized: false,
+      refusal: "parameters_invalid",
+    });
+  });
+
+  it("refuses values for an action that asked for none", () => {
+    const result = authorize({
+      ...spoken,
+      confidenceScore: 0.99,
+      structuredResult: {
+        decision: "run_action",
+        action_id: "wipe",
+        confirmation_phrase: "wipe it",
+        action_parameters: { force: "true" },
+      },
+    });
+    expect(result).toMatchObject({
+      authorized: false,
+      refusal: "parameters_invalid",
+    });
+  });
+
+  /**
+   * The product-wide floor is about whether the call went well enough to be believed. An action's
+   * own floor is about what is being authorized, so a destructive one can hold out for a clearer
+   * call without raising the bar for turning a feature off.
+   */
+  it("refuses an action that wants more certainty than this call had", () => {
+    const result = authorize({
+      ...spoken,
+      structuredResult: {
+        decision: "run_action",
+        action_id: "wipe",
+        confirmation_phrase: "wipe it",
+      },
+    });
+    expect(result).toMatchObject({
+      authorized: false,
+      refusal: "confidence_below_action_floor",
+    });
+
+    expect(
+      authorize({
+        ...spoken,
+        confidenceScore: 0.96,
+        structuredResult: {
+          decision: "run_action",
+          action_id: "wipe",
+          confirmation_phrase: "wipe it",
+        },
+      }),
+    ).toMatchObject({ authorized: true });
   });
 });

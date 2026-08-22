@@ -1,12 +1,11 @@
-import {
-  type RunbookAction,
-  actionsAllowedBy,
-  allActionIds,
-} from "../actions/registry.js";
+import type { ActionContext } from "../actions/context.js";
+import { spokenLines } from "../actions/definition.js";
+import { type RunbookAction, actionsAllowedBy } from "../actions/registry.js";
 import { type CallPlacer, isTerminalCall } from "../calle/port.js";
 import { type VerifiedCall, verifyCall } from "../calle/verify.js";
 import { type Repo, isDuplicateOpenIncident } from "../db/repo.js";
 import {
+  type Authorization,
   type Refusal,
   type SpokenDecision,
   authorize,
@@ -16,7 +15,6 @@ import {
   type AlertPayload,
   type Incident,
   type IncidentState,
-  type OfferedAction,
   type WakeReason,
   describeForSpeech,
   fingerprintFor,
@@ -55,6 +53,13 @@ export type WakeScheduler = {
   clear: (incidentId: string) => Promise<void>;
 };
 
+/**
+ * What a runbook action needs that is not about the incident: a transport, a timer, the deployment's
+ * credentials, and the deployment's own list of hosts it may reach. Required rather than defaulted,
+ * for the reason given on ActionContext.
+ */
+export type ActionEnvironment = Omit<ActionContext, "repo" | "service" | "now">;
+
 export type OrchestratorDeps = {
   repo: Repo;
   placer: CallPlacer;
@@ -65,6 +70,7 @@ export type OrchestratorDeps = {
   newId: (prefix: string) => string;
   exclusive: Exclusive;
   wake: WakeScheduler;
+  actions: ActionEnvironment;
 };
 
 export type OpenResult =
@@ -162,6 +168,21 @@ export class Orchestrator {
     // This call is over, so the timer that was going to try the next person is not wanted.
     await this.deps.wake.clear(incident.id);
 
+    // The transcript is kept before anything is decided about it, so a refusal has the same
+    // evidence behind it as an action does. It is what somebody reads to work out what was heard.
+    await this.deps.repo.recordCall({
+      callId: snapshot.id,
+      incidentId: incident.id,
+      contactId: incident.contactId,
+      status: snapshot.status,
+      taskCompleted: snapshot.taskCompleted,
+      confidence: snapshot.confidenceScore,
+      summary: snapshot.summary,
+      structuredResult: snapshot.structuredResult,
+      transcript: snapshot.transcript,
+      recordedAt: this.deps.now().toISOString(),
+    });
+
     await this.record(
       incident.id,
       "call.ended",
@@ -180,7 +201,7 @@ export class Orchestrator {
       taskCompleted: snapshot.taskCompleted,
       confidenceScore: snapshot.confidenceScore,
       structuredResult: snapshot.structuredResult,
-      offered: stillOffered(incident, policy),
+      offered: await this.stillOffered(incident, policy),
     });
 
     if (!authorization.authorized) {
@@ -188,7 +209,7 @@ export class Orchestrator {
       return;
     }
 
-    await this.runAuthorizedAction(incident, authorization.action, snapshot.id);
+    await this.runAuthorizedAction(incident, authorization, snapshot.id);
   }
 
   /**
@@ -529,7 +550,10 @@ export class Orchestrator {
     contact: Contact,
     rotationPosition: number,
   ): Promise<CallOutcome> {
-    const offered = actionsAllowedBy(policy.allowedActions);
+    const offered = actionsAllowedBy(
+      await this.deps.repo.listActionDefinitions(),
+      policy.allowedActions,
+    );
     const offeredActions = offered.map((action) => action.id);
     const attempt = incident.callAttempts + 1;
     const startedAt = this.deps.now();
@@ -907,35 +931,48 @@ export class Orchestrator {
 
   private async runAuthorizedAction(
     incident: Incident,
-    action: RunbookAction,
+    authorization: Extract<Authorization<RunbookAction>, { authorized: true }>,
     callId: string,
   ): Promise<void> {
-    const at = this.deps.now().toISOString();
+    const action = authorization.action;
+    const startedAt = this.deps.now();
     await this.deps.repo.updateIncident(
       incident.id,
       { state: transition("deciding", "acting") },
-      at,
+      startedAt.toISOString(),
     );
 
-    const result = await action.run({
+    const authorizer = await this.authorizer(incident);
+    const result = await action.run(authorization.parameters, {
       repo: this.deps.repo,
       service: incident.service,
       now: this.deps.now,
+      ...this.deps.actions,
     });
-    const finishedAt = this.deps.now().toISOString();
+    const finished = this.deps.now();
 
     await this.deps.repo.recordActionRun({
       id: this.deps.newId("run"),
       incidentId: incident.id,
       actionId: action.id,
-      authorizedBy: callId,
+      callId,
+      contactId: incident.contactId,
+      authorizedBy: authorizer?.name ?? null,
+      decision: authorization.decision,
+      parameters: authorization.parameters,
       stateBefore: result.stateBefore,
       stateAfter: result.stateAfter,
       outcome: result.outcome,
       detail: result.detail,
-      at: finishedAt,
+      attempts: result.attempts,
+      durationMs: finished.getTime() - startedAt.getTime(),
+      verification: result.verification,
+      at: finished.toISOString(),
     });
 
+    // Only a checked success resolves an incident. An action that reported success while the check
+    // that was supposed to confirm it did not is left open on purpose: telling somebody a
+    // production problem is fixed when nobody has looked is the one thing this must never do.
     const nextState = result.outcome === "succeeded" ? "resolved" : "failed";
     await this.deps.repo.updateIncident(
       incident.id,
@@ -943,18 +980,49 @@ export class Orchestrator {
         state: transition("acting", nextState),
         outcome: `${action.id}:${result.outcome}`,
       },
-      finishedAt,
+      finished.toISOString(),
     );
     await this.record(incident.id, `action.${result.outcome}`, result.detail, {
       actionId: action.id,
+      attempts: result.attempts,
+      verified: result.verification?.verified ?? null,
     });
+  }
+
+  /** Who authorized this, by name, so the audit record survives the contact being deleted. */
+  private async authorizer(incident: Incident): Promise<Contact | null> {
+    if (incident.contactId === null) return null;
+    const rotation = await this.rotationFor(incident.service);
+    return rotation.find((one) => one.id === incident.contactId) ?? null;
   }
 
   private async policyFor(service: string): Promise<ServicePolicy> {
     const stored = await this.deps.repo.getServicePolicy(service);
-    return (
-      stored ??
-      defaultPolicy(service, allActionIds(), this.deps.now().toISOString())
+    if (stored !== null) return stored;
+
+    const defined = await this.deps.repo.listActionDefinitions();
+    return defaultPolicy(
+      service,
+      defined.map((definition) => definition.id),
+      this.deps.now().toISOString(),
+    );
+  }
+
+  /**
+   * The actions that were read out on this call and are still permitted now. Recomputing the offer
+   * at decision time would authorize against a set the responder never heard, which is the same
+   * defect as looking an action id up in a different list, one level further out. An intersection is
+   * the safe direction on both sides: a policy that has since withdrawn an action cannot run it, and
+   * an action added or edited since the call was placed was never on the table.
+   */
+  private async stillOffered(
+    incident: Incident,
+    policy: ServicePolicy,
+  ): Promise<readonly RunbookAction[]> {
+    const spoken = new Set(incident.offeredActions);
+    const defined = await this.deps.repo.listActionDefinitions();
+    return actionsAllowedBy(defined, policy.allowedActions).filter((action) =>
+      spoken.has(action.id),
     );
   }
 
@@ -990,23 +1058,6 @@ export function incidentIdOf(snapshot: VerifiedCall): string | null {
 }
 
 /**
- * The actions that were read out on this call and are still permitted now. Recomputing the offer at
- * decision time would authorize against a set the responder never heard, which is the same defect
- * as looking an action id up in a different list, one level further out. An intersection is the
- * safe direction on both sides: a policy that has since withdrawn an action cannot run it, and an
- * action added since the call was placed was never on the table.
- */
-function stillOffered(
-  incident: Incident,
-  policy: ServicePolicy,
-): readonly RunbookAction[] {
-  const spoken = new Set(incident.offeredActions);
-  return actionsAllowedBy(policy.allowedActions).filter((action) =>
-    spoken.has(action.id),
-  );
-}
-
-/**
  * A responder who answered the phone and said "escalate" must not end up somewhere more final than
  * a call nobody picked up. Only an explicit hold is terminal; everything else goes to the rotation,
  * and a snooze keeps its own state so the minutes mean something.
@@ -1029,18 +1080,10 @@ function spokenState(decision: SpokenDecision | undefined): IncidentState {
 
 function buildTask(
   incident: Incident,
-  offered: readonly OfferedAction[],
+  offered: readonly RunbookAction[],
   now: Date,
 ): string {
-  const choices = offered
-    .map((action) => {
-      const confirmation =
-        action.confirmationPhrase === undefined
-          ? ""
-          : ` Before doing this one, ask them to say the exact words "${action.confirmationPhrase}" and record what they said.`;
-      return `- ${action.id}: ${action.spokenDescription}.${confirmation}`;
-    })
-    .join("\n");
+  const choices = offered.map(spokenLines).join("\n");
 
   return [
     // CALL-E refuses to create a task that does not say who the caller is, which is right: a
@@ -1062,6 +1105,7 @@ function buildTask(
     "- snooze: leave it and call back later, and ask how many minutes.",
     "",
     "Read the choices out only if they ask what you can do, or if they have not decided after their questions are answered. Do not push them.",
+    "Where an action asks for a value, ask for it in their own words and report exactly what they said in action_parameters. If they do not give one, leave it out rather than filling it in yourself.",
     "Before ending the call, say back what you understood the decision to be and get a yes.",
   ].join("\n");
 }

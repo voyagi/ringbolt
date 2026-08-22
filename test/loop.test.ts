@@ -1,8 +1,9 @@
 import { SELF, env } from "cloudflare:test";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { CallSnapshot } from "../src/calle/port.js";
 import { Repo } from "../src/db/repo.js";
 import { resetTables } from "./support/reset.js";
+import { deliverWebhook, terminalCallFor } from "./support/webhook.js";
 
 const TOKEN = "test-intake-token-0123456789";
 
@@ -12,28 +13,6 @@ async function postAlert(body: unknown, token = TOKEN): Promise<Response> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-}
-
-async function terminalCallFor(incidentId: string): Promise<CallSnapshot> {
-  return vi.waitFor(
-    async () => {
-      const row = await env.DB.prepare(`SELECT snapshot FROM fake_calls`).all<{
-        snapshot: string;
-      }>();
-      const snapshots = row.results.map(
-        (r) => JSON.parse(r.snapshot) as CallSnapshot,
-      );
-      const match = snapshots.find(
-        (snapshot) =>
-          snapshot.metadata["incident_id"] === incidentId &&
-          snapshot.status !== "queued",
-      );
-      if (match === undefined)
-        throw new Error("the call has not reached a terminal state yet");
-      return match;
-    },
-    { timeout: 5000, interval: 25 },
-  );
 }
 
 /**
@@ -69,22 +48,6 @@ async function aCallStillRinging(incidentId: string): Promise<CallSnapshot> {
   return queued;
 }
 
-async function deliverWebhook(
-  call: CallSnapshot,
-  eventId = `evt_${crypto.randomUUID()}`,
-): Promise<Response> {
-  return SELF.fetch("https://ringbolt.test/webhooks/calle", {
-    method: "POST",
-    headers: { "content-type": "application/json", "CALL-E-Event-Id": eventId },
-    body: JSON.stringify({
-      id: eventId,
-      type: "call.completed",
-      created_at: new Date().toISOString(),
-      data: { id: call.id, status: call.status, metadata: call.metadata },
-    }),
-  });
-}
-
 describe("the whole loop", () => {
   beforeEach(async () => {
     await resetTables(env.DB);
@@ -109,7 +72,7 @@ describe("the whole loop", () => {
     expect(accepted.state).toBe("calling");
     expect(accepted.duplicate).toBe(false);
 
-    const call = await terminalCallFor(accepted.incident);
+    const call = await terminalCallFor(env.DB, accepted.incident);
     expect(call.status).toBe("completed");
 
     const delivered = await deliverWebhook(call);
@@ -138,7 +101,7 @@ describe("the whole loop", () => {
       title: "Latency above 5 seconds",
     });
     const accepted = (await response.json()) as { incident: string };
-    const call = await terminalCallFor(accepted.incident);
+    const call = await terminalCallFor(env.DB, accepted.incident);
 
     const eventId = "evt_replayed_once";
     expect((await deliverWebhook(call, eventId)).status).toBe(200);
@@ -191,7 +154,7 @@ describe("the whole loop", () => {
       title: "Payment errors above 20 percent",
     });
     const accepted = (await response.json()) as { incident: string };
-    const call = await terminalCallFor(accepted.incident);
+    const call = await terminalCallFor(env.DB, accepted.incident);
 
     const eventId = "evt_retried_after_a_failure";
     const lost = await SELF.fetch("https://ringbolt.test/webhooks/calle", {
@@ -263,7 +226,7 @@ describe("the whole loop", () => {
     const repo = new Repo(env.DB);
     expect((await repo.getIncident(accepted.incident))?.state).toBe("calling");
 
-    const call = await terminalCallFor(accepted.incident);
+    const call = await terminalCallFor(env.DB, accepted.incident);
     expect((await deliverWebhook(call)).status).toBe(200);
     expect((await repo.getIncident(accepted.incident))?.state).toBe("resolved");
   });

@@ -16,6 +16,7 @@ import {
   newId,
   unscheduledWakes,
 } from "../src/worker/wiring.js";
+import { testActions } from "./support/actions.js";
 import { resetTables } from "./support/reset.js";
 
 const alert: AlertPayload = {
@@ -75,6 +76,7 @@ function orchestratorWith(placer: CallPlacer): Orchestrator {
     newId,
     exclusive: (work) => work(),
     wake: unscheduledWakes,
+    actions: testActions(),
   });
 }
 

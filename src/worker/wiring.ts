@@ -1,3 +1,4 @@
+import { secretBindingPattern } from "../actions/definition.js";
 import {
   D1FakeCallStore,
   FakeCallPlacer,
@@ -7,11 +8,16 @@ import {
 import { LiveCallPlacer } from "../calle/live.js";
 import type { CallPlacer, PlaceCallInput, Scheduler } from "../calle/port.js";
 import { Repo } from "../db/repo.js";
-import type { Exclusive, WakeScheduler } from "../domain/orchestrator.js";
+import type {
+  ActionEnvironment,
+  Exclusive,
+  WakeScheduler,
+} from "../domain/orchestrator.js";
 import { Orchestrator } from "../domain/orchestrator.js";
 import {
   type Bindings,
   type RingboltConfig,
+  allowedActionHosts,
   allowedLiveNumbers,
 } from "./env.js";
 
@@ -82,6 +88,13 @@ export type OrchestratorOptions = PlacerOptions & {
   /** Dialled when no rotation has been configured. Live mode uses the configured number. */
   responderPhone?: string;
   /**
+   * The transport a runbook action's own request goes out on, and the wait between its retries.
+   * The product wants the platform's fetch and a real timer; a test that has configured an action
+   * reaching outside supplies both so that it stays a test.
+   */
+  actionFetch?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+  /**
    * Required rather than defaulted, because a default would be an unserialised one and the caller
    * that most needs the section is the one least likely to notice it is missing.
    */
@@ -136,6 +149,32 @@ function responderFor(
   return override ?? UNCONFIGURED_RESPONDER;
 }
 
+/**
+ * Only a binding whose name says it is for runbook actions can be read as one. The definition
+ * schema already refuses any other name; this is the same rule at the other end, so that a stored
+ * row from before that rule existed still cannot reach the CALL-E key or the admin token.
+ */
+function readSecret(env: Bindings, binding: string): string | undefined {
+  if (!secretBindingPattern.test(binding)) return undefined;
+  const value = env[binding];
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+export function actionEnvironment(
+  env: Bindings,
+  config: RingboltConfig,
+  options: Pick<OrchestratorOptions, "actionFetch" | "sleep">,
+): ActionEnvironment {
+  return {
+    http: options.actionFetch ?? ((input, init) => fetch(input, init)),
+    sleep:
+      options.sleep ??
+      ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
+    secret: (binding) => readSecret(env, binding),
+    allowedHosts: allowedActionHosts(config),
+  };
+}
+
 export function buildOrchestrator(
   env: Bindings,
   config: RingboltConfig,
@@ -151,5 +190,6 @@ export function buildOrchestrator(
     newId,
     exclusive: options.exclusive,
     wake: options.wake,
+    actions: actionEnvironment(env, config, options),
   });
 }
