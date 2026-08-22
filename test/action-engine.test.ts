@@ -294,6 +294,39 @@ describe("an action an operator defined rather than one that was compiled in", (
     expect(await new Repo(env.DB).listActionRuns(incident.id)).toHaveLength(0);
   });
 
+  /**
+   * The other half of the same rule, and the one the offered set cannot catch: the action WAS read
+   * out, and the policy stopped permitting it while the responder was still on the phone. The set
+   * that authorizes is the intersection, so it cannot run.
+   */
+  it("cannot be run after the policy withdrew it mid-call", async () => {
+    await defineRestartAction();
+    const { sent, http } = transport(() => jsonResponse({ ok: true }));
+    const incident = await opened(testActions({ http }));
+    expect(incident.offeredActions).toContain("restart_workers");
+
+    await new Repo(env.DB).upsertServicePolicy(
+      defaultPolicy("checkout", ["kill_switch"], "2026-08-22T10:00:00.000Z"),
+    );
+
+    await orchestrator(testActions({ http })).onCallTerminal(
+      decided(incident, {
+        decision: "run_action",
+        action_id: "restart_workers",
+        confirmation_phrase: "restart the workers",
+        action_parameters: { reason: "because" },
+      }),
+    );
+
+    expect(sent).toHaveLength(0);
+    const repo = new Repo(env.DB);
+    expect(await repo.listActionRuns(incident.id)).toHaveLength(0);
+    const refusal = (await repo.listEvents(incident.id)).find(
+      (event) => event.kind === "action.refused",
+    );
+    expect(refusal?.data).toMatchObject({ refusal: "action_not_offered" });
+  });
+
   it("refuses a value the action would not accept, and sends nothing", async () => {
     await defineRestartAction({
       parameters: [
