@@ -101,7 +101,8 @@ export type OfferedAction = {
   label: string;
   /** Spoken to the responder, so it has to be a sentence rather than a description of a function. */
   spokenDescription: string;
-  confirmationPhrase?: string;
+  /** The exact words that have to be said back, or null when this one is not destructive. */
+  confirmationPhrase: string | null;
 };
 
 export type IncidentLink = { label: string; url: string };

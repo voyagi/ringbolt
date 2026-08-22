@@ -1,3 +1,5 @@
+import type { ActionDefinition } from "../actions/definition.js";
+import { actionDefinitionInput } from "../actions/definition.js";
 import type {
   Incident,
   IncidentLink,
@@ -61,16 +63,47 @@ export type ServiceState = {
   updatedAt: string;
 };
 
+/**
+ * One carried-out action, and everything a person would need to judge it afterwards: which call
+ * authorized it, who was on that call, what they decided, what values they gave, what the system
+ * looked like either side of it, and whether anybody checked that it took.
+ */
 export type ActionRun = {
   id: string;
   incidentId: string;
   actionId: string;
+  callId: string | null;
+  contactId: string | null;
+  /** The name of the person who authorized it, kept here so deleting a contact cannot erase it. */
   authorizedBy: string | null;
+  decision: unknown;
+  parameters: unknown;
   stateBefore: unknown;
   stateAfter: unknown;
-  outcome: "succeeded" | "failed" | "refused";
+  outcome: "succeeded" | "failed" | "unverified";
   detail: string | null;
+  attempts: number;
+  durationMs: number | null;
+  verification: unknown;
   at: string;
+};
+
+/**
+ * What was said on the call. It is kept here rather than left in CALL-E's records, which expire and
+ * cannot be read without their API, and it is personal data: the endpoint that serves it is behind
+ * the admin token, and phase 7 gives it a retention window.
+ */
+export type CallRecord = {
+  callId: string;
+  incidentId: string;
+  contactId: string | null;
+  status: string;
+  taskCompleted: boolean | null;
+  confidence: number | null;
+  summary: string | null;
+  structuredResult: unknown;
+  transcript: unknown;
+  recordedAt: string;
 };
 
 type IncidentRow = {
@@ -102,6 +135,51 @@ type ContactRow = {
   name: string;
   phone: string;
   created_at: string;
+};
+
+type ActionRunRow = {
+  id: string;
+  incident_id: string;
+  action_id: string;
+  call_id: string | null;
+  contact_id: string | null;
+  authorized_by: string | null;
+  decision: string | null;
+  parameters: string | null;
+  state_before: string | null;
+  state_after: string | null;
+  outcome: string;
+  detail: string | null;
+  attempts: number;
+  duration_ms: number | null;
+  verification: string | null;
+  at: string;
+};
+
+type CallRecordRow = {
+  call_id: string;
+  incident_id: string;
+  contact_id: string | null;
+  status: string;
+  task_completed: number | null;
+  confidence: number | null;
+  summary: string | null;
+  structured_result: string | null;
+  transcript: string;
+  recorded_at: string;
+};
+
+type ActionDefinitionRow = {
+  id: string;
+  label: string;
+  spoken_description: string;
+  confirmation_phrase: string | null;
+  min_confidence: number | null;
+  parameters: string;
+  target: string;
+  verify: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type ServicePolicyRow = {
@@ -383,21 +461,146 @@ export class Repo {
   async recordActionRun(run: ActionRun): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO action_runs (id, incident_id, action_id, authorized_by, state_before, state_after, outcome, detail, at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+        `INSERT INTO action_runs (id, incident_id, action_id, call_id, contact_id, authorized_by, decision, parameters, state_before, state_after, outcome, detail, attempts, duration_ms, verification, at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)`,
       )
       .bind(
         run.id,
         run.incidentId,
         run.actionId,
+        run.callId,
+        run.contactId,
         run.authorizedBy,
+        JSON.stringify(run.decision ?? null),
+        JSON.stringify(run.parameters ?? null),
         JSON.stringify(run.stateBefore ?? null),
         JSON.stringify(run.stateAfter ?? null),
         run.outcome,
         run.detail,
+        run.attempts,
+        run.durationMs,
+        JSON.stringify(run.verification ?? null),
         run.at,
       )
       .run();
+  }
+
+  async listActionRuns(incidentId: string): Promise<ActionRun[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT * FROM action_runs WHERE incident_id = ?1 ORDER BY at ASC`,
+      )
+      .bind(incidentId)
+      .all<ActionRunRow>();
+    return results.map(toActionRun);
+  }
+
+  async recordCall(record: CallRecord): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO call_records (call_id, incident_id, contact_id, status, task_completed, confidence, summary, structured_result, transcript, recorded_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT (call_id) DO UPDATE SET
+           status = excluded.status,
+           task_completed = excluded.task_completed,
+           confidence = excluded.confidence,
+           summary = excluded.summary,
+           structured_result = excluded.structured_result,
+           transcript = excluded.transcript,
+           recorded_at = excluded.recorded_at`,
+      )
+      .bind(
+        record.callId,
+        record.incidentId,
+        record.contactId,
+        record.status,
+        record.taskCompleted === null ? null : Number(record.taskCompleted),
+        record.confidence,
+        record.summary,
+        JSON.stringify(record.structuredResult ?? null),
+        JSON.stringify(record.transcript ?? []),
+        record.recordedAt,
+      )
+      .run();
+  }
+
+  async listCallRecords(incidentId: string): Promise<CallRecord[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT * FROM call_records WHERE incident_id = ?1 ORDER BY recorded_at ASC`,
+      )
+      .bind(incidentId)
+      .all<CallRecordRow>();
+    return results.map(toCallRecord);
+  }
+
+  /**
+   * Every action this install can carry out. A row that no longer parses is dropped rather than
+   * offered: a definition Ringbolt cannot read is one it cannot reason about, and the safe way to
+   * fail on that is to have nothing to offer rather than to offer something half understood.
+   */
+  async listActionDefinitions(): Promise<ActionDefinition[]> {
+    const { results } = await this.db
+      .prepare(`SELECT * FROM action_definitions ORDER BY id ASC`)
+      .all<ActionDefinitionRow>();
+    return results
+      .map(toActionDefinition)
+      .filter(
+        (definition): definition is ActionDefinition => definition !== null,
+      );
+  }
+
+  async getActionDefinition(id: string): Promise<ActionDefinition | null> {
+    const row = await this.db
+      .prepare(`SELECT * FROM action_definitions WHERE id = ?1`)
+      .bind(id)
+      .first<ActionDefinitionRow>();
+    return row === null ? null : toActionDefinition(row);
+  }
+
+  async upsertActionDefinition(definition: ActionDefinition): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO action_definitions (id, label, spoken_description, confirmation_phrase, min_confidence, parameters, target, verify, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT (id) DO UPDATE SET
+           label = excluded.label,
+           spoken_description = excluded.spoken_description,
+           confirmation_phrase = excluded.confirmation_phrase,
+           min_confidence = excluded.min_confidence,
+           parameters = excluded.parameters,
+           target = excluded.target,
+           verify = excluded.verify,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        definition.id,
+        definition.label,
+        definition.spokenDescription,
+        definition.confirmationPhrase,
+        definition.minConfidence,
+        JSON.stringify(definition.parameters),
+        JSON.stringify(definition.target),
+        definition.verify === null ? null : JSON.stringify(definition.verify),
+        definition.createdAt,
+        definition.updatedAt,
+      )
+      .run();
+  }
+
+  async deleteActionDefinition(id: string): Promise<void> {
+    await this.db
+      .prepare(`DELETE FROM action_definitions WHERE id = ?1`)
+      .bind(id)
+      .run();
+  }
+
+  /** Which services still permit this action, so removing one cannot silently change a policy. */
+  async policiesPermitting(actionId: string): Promise<string[]> {
+    const policies = await this.listServicePolicies();
+    return policies
+      .filter((policy) => policy.allowedActions.includes(actionId))
+      .map((policy) => policy.service);
   }
 
   /**
@@ -641,6 +844,72 @@ function toIncident(row: IncidentRow): Incident {
     callStartedAt: row.call_started_at,
     callId: row.call_id,
     outcome: row.outcome,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function parseJson(stored: string | null): unknown {
+  if (stored === null) return null;
+  try {
+    return JSON.parse(stored) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function toActionRun(row: ActionRunRow): ActionRun {
+  return {
+    id: row.id,
+    incidentId: row.incident_id,
+    actionId: row.action_id,
+    callId: row.call_id,
+    contactId: row.contact_id,
+    authorizedBy: row.authorized_by,
+    decision: parseJson(row.decision),
+    parameters: parseJson(row.parameters),
+    stateBefore: parseJson(row.state_before),
+    stateAfter: parseJson(row.state_after),
+    outcome: row.outcome as ActionRun["outcome"],
+    detail: row.detail,
+    attempts: row.attempts,
+    durationMs: row.duration_ms,
+    verification: parseJson(row.verification),
+    at: row.at,
+  };
+}
+
+function toCallRecord(row: CallRecordRow): CallRecord {
+  return {
+    callId: row.call_id,
+    incidentId: row.incident_id,
+    contactId: row.contact_id,
+    status: row.status,
+    taskCompleted:
+      row.task_completed === null ? null : row.task_completed === 1,
+    confidence: row.confidence,
+    summary: row.summary,
+    structuredResult: parseJson(row.structured_result),
+    transcript: parseJson(row.transcript) ?? [],
+    recordedAt: row.recorded_at,
+  };
+}
+
+function toActionDefinition(row: ActionDefinitionRow): ActionDefinition | null {
+  const parsed = actionDefinitionInput.safeParse({
+    label: row.label,
+    spokenDescription: row.spoken_description,
+    confirmationPhrase: row.confirmation_phrase,
+    minConfidence: row.min_confidence,
+    parameters: parseJson(row.parameters) ?? [],
+    target: parseJson(row.target),
+    verify: parseJson(row.verify),
+  });
+  if (!parsed.success) return null;
+
+  return {
+    ...parsed.data,
+    id: row.id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

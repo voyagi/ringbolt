@@ -5,6 +5,7 @@ import type { Incident } from "../src/domain/incident.js";
 import {
   ConfigurationError,
   type LiveConfig,
+  allowedActionHosts,
   allowedLiveNumbers,
   readConfig,
 } from "../src/worker/env.js";
@@ -51,6 +52,17 @@ describe("the test environment itself", () => {
     const ambient = env as unknown as Record<string, string>;
     expect(ambient["CALLE_API_KEY"]).not.toMatch(/^iams_/);
     expect(ambient["DEMO_PHONE"]).toBe("+99900000000");
+  });
+
+  /**
+   * The same idea one layer out. A runbook action can reach any host somebody stores in a table,
+   * and a test can store one, so the suite pins the only name any action it defines may call. That
+   * name does not resolve, so the worst a stored action can do here is fail to connect.
+   */
+  it("can only point a runbook action at a name that does not exist", () => {
+    expect(allowedActionHosts(readConfig(env))).toEqual([
+      "actions.ringbolt.test",
+    ]);
   });
 });
 

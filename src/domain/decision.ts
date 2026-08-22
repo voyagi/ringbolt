@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { ActionParameter, ParameterValue } from "../actions/definition.js";
+import { readParameters } from "../actions/parameters.js";
 
 /**
  * The shape Ringbolt asks CALL-E to extract from the conversation. It is sent as the call's
@@ -25,6 +27,12 @@ export const decisionResultSchema = {
       description:
         "The exact confirmation phrase the responder said out loud. Required for any action marked as needing confirmation.",
     },
+    action_parameters: {
+      type: "object",
+      additionalProperties: { type: "string" },
+      description:
+        "Any values the chosen action asked for, keyed by the parameter name that was read out. Leave a value out rather than guessing at it.",
+    },
     snooze_minutes: {
       type: "number",
       description:
@@ -49,6 +57,7 @@ export const spokenDecision = z.object({
   decision: z.enum(decisionKinds),
   action_id: z.string().min(1).optional(),
   confirmation_phrase: z.string().optional(),
+  action_parameters: z.record(z.string(), z.unknown()).optional(),
   snooze_minutes: z
     .number()
     .finite()
@@ -62,10 +71,15 @@ export type SpokenDecision = z.infer<typeof spokenDecision>;
 
 export const CONFIDENCE_FLOOR = 0.7;
 
-/** Enough of an action for the gate to decide on it: what it is called and what must be said. */
+/**
+ * Enough of an action for the gate to decide on it: what it is called, what must be said before it
+ * runs, what values it takes, and whether it wants more certainty than the product-wide floor.
+ */
 export type OfferedActionLike = {
   id: string;
-  confirmationPhrase?: string;
+  confirmationPhrase?: string | null;
+  parameters?: readonly ActionParameter[];
+  minConfidence?: number | null;
 };
 
 export type AuthorizationInput<TAction extends OfferedActionLike> = {
@@ -83,7 +97,13 @@ export type AuthorizationInput<TAction extends OfferedActionLike> = {
 };
 
 export type Authorization<TAction extends OfferedActionLike> =
-  | { authorized: true; decision: SpokenDecision; action: TAction }
+  | {
+      authorized: true;
+      decision: SpokenDecision;
+      action: TAction;
+      /** What the responder said the action should be given, checked against what it declared. */
+      parameters: Record<string, ParameterValue>;
+    }
   | {
       authorized: false;
       refusal: RefusalReason;
@@ -103,8 +123,10 @@ export type RefusalReason =
   | "result_not_schema_valid"
   | "not_an_action_decision"
   | "action_not_offered"
+  | "confidence_below_action_floor"
   | "confirmation_missing"
-  | "confirmation_mismatch";
+  | "confirmation_mismatch"
+  | "parameters_invalid";
 
 /**
  * Every refusal here is a decision NOT to touch production. The order matters: cheaper and more
@@ -179,28 +201,64 @@ export function authorize<TAction extends OfferedActionLike>(
     };
   }
 
-  const requiredPhrase = action.confirmationPhrase;
-  if (requiredPhrase !== undefined) {
-    const spoken = decision.confirmation_phrase;
-    if (spoken === undefined || spoken.trim() === "") {
-      return {
-        authorized: false,
-        refusal: "confirmation_missing",
-        detail: `${actionId} needs the spoken phrase "${requiredPhrase}"`,
-        decision,
-      };
-    }
-    if (!phrasesMatch(spoken, requiredPhrase)) {
-      return {
-        authorized: false,
-        refusal: "confirmation_mismatch",
-        detail: `heard "${spoken}" but this action needs "${requiredPhrase}"`,
-        decision,
-      };
-    }
+  // An action may ask for more certainty than the product-wide floor. The floor above is about the
+  // call; this one is about what is being authorized, so a destructive action can hold out for a
+  // clearer one without raising the bar for turning a feature off.
+  const ownFloor = action.minConfidence;
+  if (ownFloor !== undefined && ownFloor !== null && score < ownFloor) {
+    return {
+      authorized: false,
+      refusal: "confidence_below_action_floor",
+      detail: `${actionId} needs a confidence of at least ${ownFloor} and this call scored ${score}`,
+      decision,
+    };
   }
 
-  return { authorized: true, decision, action };
+  const confirmation = checkConfirmation(action, decision, actionId);
+  if (confirmation !== null) return confirmation;
+
+  const read = readParameters(
+    action.parameters ?? [],
+    decision.action_parameters,
+  );
+  if (!read.ok) {
+    return {
+      authorized: false,
+      refusal: "parameters_invalid",
+      detail: read.problem,
+      decision,
+    };
+  }
+
+  return { authorized: true, decision, action, parameters: read.values };
+}
+
+function checkConfirmation<TAction extends OfferedActionLike>(
+  action: TAction,
+  decision: SpokenDecision,
+  actionId: string,
+): Refusal<TAction> | null {
+  const required = action.confirmationPhrase;
+  if (required === undefined || required === null) return null;
+
+  const spoken = decision.confirmation_phrase;
+  if (spoken === undefined || spoken.trim() === "") {
+    return {
+      authorized: false,
+      refusal: "confirmation_missing",
+      detail: `${actionId} needs the spoken phrase "${required}"`,
+      decision,
+    };
+  }
+  if (!phrasesMatch(spoken, required)) {
+    return {
+      authorized: false,
+      refusal: "confirmation_mismatch",
+      detail: `heard "${spoken}" but this action needs "${required}"`,
+      decision,
+    };
+  }
+  return null;
 }
 
 /**

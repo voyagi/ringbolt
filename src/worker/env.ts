@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { actionUrlProblem } from "../actions/definition.js";
 import { fakeScenarioKinds } from "../calle/fake.js";
 import { phoneNumber } from "../domain/rotation.js";
 
@@ -44,6 +45,23 @@ const shared = {
   CALLE_FAKE_SCENARIO: blankIsAbsent(
     z.enum(fakeScenarioKinds).default("answers"),
   ),
+  /**
+   * Every host a runbook action may call, comma separated. The same argument as the phone number
+   * allowlist: an action definition is a row in a table that the configuration API writes, so
+   * without this the set of systems a deployment can reach is whatever somebody typed into it.
+   * Leaving it out is allowed in development only, and outside development it means no action may
+   * call anything at all, which fails towards doing nothing.
+   */
+  ACTION_HOST_ALLOWLIST: blankIsAbsent(
+    z
+      .string()
+      .max(500)
+      .refine(
+        (value) => splitList(value).every(isCallableHost),
+        "must be public host names separated by commas, and each one has to be a host an action is allowed to call",
+      )
+      .optional(),
+  ),
 };
 
 /**
@@ -73,7 +91,7 @@ const envSchema = z.discriminatedUnion("CALLE_MODE", [
       z
         .string()
         .refine(
-          (value) => splitNumbers(value).every(isE164),
+          (value) => splitList(value).every(isE164),
           "must be E.164 phone numbers separated by commas, for example +31612345678,+31698765432",
         )
         .optional(),
@@ -84,7 +102,7 @@ const envSchema = z.discriminatedUnion("CALLE_MODE", [
 export type RingboltConfig = z.infer<typeof envSchema>;
 export type LiveConfig = Extract<RingboltConfig, { CALLE_MODE: "live" }>;
 
-function splitNumbers(value: string): string[] {
+function splitList(value: string): string[] {
   return value
     .split(",")
     .map((entry) => entry.trim())
@@ -96,6 +114,30 @@ function isE164(value: string): boolean {
 }
 
 /**
+ * A host is allowed onto the list only if an action would have been allowed to call it, which is
+ * the same check the definition and the executor make. Reusing it is the point: a name that the
+ * url rule refuses cannot be smuggled past it by being written into the allowlist instead.
+ */
+function isCallableHost(value: string): boolean {
+  return actionUrlProblem(`https://${value}/`) === null;
+}
+
+/**
+ * The hosts a runbook action may call, or null when there is no restriction, which only happens in
+ * development. An unset allowlist anywhere else yields an empty list: no host, so no action that
+ * reaches outside can run at all until an operator names one.
+ */
+export function allowedActionHosts(
+  config: RingboltConfig,
+): readonly string[] | null {
+  const configured = config.ACTION_HOST_ALLOWLIST;
+  if (configured === undefined) {
+    return config.RINGBOLT_ENV === "development" ? null : [];
+  }
+  return splitList(configured).map((host) => host.toLowerCase());
+}
+
+/**
  * The numbers a live build may dial. The configured demo number is always on it: it is what the
  * fallback responder uses when no rotation has been set up, so leaving it off would mean a build
  * that cannot ring the one number its own configuration names.
@@ -104,7 +146,7 @@ export function allowedLiveNumbers(config: LiveConfig): string[] {
   const configured = config.LIVE_CALL_ALLOWLIST;
   if (configured === undefined) return [config.DEMO_PHONE];
 
-  const numbers = splitNumbers(configured);
+  const numbers = splitList(configured);
   return numbers.includes(config.DEMO_PHONE)
     ? numbers
     : [...numbers, config.DEMO_PHONE];
