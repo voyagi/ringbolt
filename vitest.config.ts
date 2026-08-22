@@ -11,8 +11,20 @@ export default defineConfig({
     cloudflareTest({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
+        // These win over `.dev.vars`, which is what makes the three below a guarantee rather than
+        // a convention. On 2026-08-22 the suite was run while `.dev.vars` said `CALLE_MODE=live`,
+        // and it did what it was told: the tests built the real telephone from the real key and
+        // rang a real number three times. A test run must not be able to reach a telephone because
+        // of a file somebody edited for an unrelated reason, so it no longer can.
         bindings: {
           TEST_MIGRATIONS: migrations,
+          // First layer. The suite runs against the stand-in, always, whatever the environment says.
+          CALLE_MODE: "fake",
+          // Second layer. Even a test that built a live placer could not authenticate.
+          CALLE_API_KEY: "test-key-not-a-real-credential",
+          // Third layer. Country code 999 is unassigned, so this is a well-formed number that no
+          // telephone network can route. A live placer reaching dial would ring nothing.
+          DEMO_PHONE: "+99900000000",
           // The stand-in's think time only exists so a demo looks like a real call.
           CALLE_FAKE_DELAY_MS: "20",
           INTAKE_TOKEN: "test-intake-token-0123456789",

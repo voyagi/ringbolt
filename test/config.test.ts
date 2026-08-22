@@ -8,6 +8,7 @@ import {
   allowedLiveNumbers,
   readConfig,
 } from "../src/worker/env.js";
+import { buildPlacer, immediateScheduler } from "../src/worker/wiring.js";
 
 const base = {
   RINGBOLT_ENV: "production",
@@ -22,6 +23,36 @@ const live = {
   CALLE_API_KEY: "test-key-configuration",
   DEMO_PHONE: "+31612345678",
 };
+
+/**
+ * The suite cannot reach a telephone. This is not a style rule, it is the thing that failed: on
+ * 2026-08-22 the suite was run while `.dev.vars` said `CALLE_MODE=live`, and it obediently built
+ * the real client from the real key and rang a real number three times. `vitest.config.ts` now
+ * pins the mode, the key and the number, and these assertions are what stop that pinning being
+ * quietly removed by somebody who does not know why it is there.
+ */
+describe("the test environment itself", () => {
+  it("cannot be in live mode however the machine is configured", () => {
+    expect(readConfig(env).CALLE_MODE).toBe("fake");
+  });
+
+  it("builds the stand-in rather than a real telephone", () => {
+    const placer = buildPlacer(env, readConfig(env), {
+      scheduler: immediateScheduler,
+    });
+    expect(placer.kind).toBe("fake");
+  });
+
+  /**
+   * Defence in depth, because the point of the second and third layers is that they hold when the
+   * first one has been broken. An unassigned country code cannot be routed by any network.
+   */
+  it("carries no real credential and no reachable number", () => {
+    const ambient = env as unknown as Record<string, string>;
+    expect(ambient["CALLE_API_KEY"]).not.toMatch(/^iams_/);
+    expect(ambient["DEMO_PHONE"]).toBe("+99900000000");
+  });
+});
 
 describe("reading the configuration", () => {
   it("accepts the stand-in", () => {
