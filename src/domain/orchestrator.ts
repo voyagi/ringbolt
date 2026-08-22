@@ -1043,8 +1043,13 @@ function buildTask(
     .join("\n");
 
   return [
-    "You are calling the engineer who is on call, about a live production problem.",
-    "Open by saying who is calling and what has broken, in one sentence, then stop and let them respond.",
+    // CALL-E refuses to create a task that does not say who the caller is, which is right: a
+    // stranger's telephone ringing at three in the morning with an unnamed voice on it is how a
+    // person hangs up on their own alert. Naming Ringbolt is also the only introduction that makes
+    // the rest of the call make sense, because what follows is a request for authority to act.
+    "You are Ringbolt, an automated on-call line. You telephone the engineer on call when a production system breaks, talk the incident through with them, and carry out the fix they authorize.",
+    `You are calling the engineer on call for ${incident.service}, about a live production problem.`,
+    'Open with one sentence that names you as Ringbolt and says what has broken, for example "This is Ringbolt calling about checkout, payment errors are above twenty percent." Then stop and let them respond.',
     "",
     describeForSpeech(incident, now),
     "",
