@@ -46,8 +46,8 @@ that set it, and it wakes an incident by calling the identical code the alarm wo
 Nothing an incident can do leaves it stuck, because an incident that is stuck is an alert that has
 silently stopped ringing.
 
-One step of that list is still ahead of the code, and the Status section below says where it is:
-runbook actions are hardcoded rather than defined by an operator.
+Every step of that list runs. What is still ahead of the code is the screens rather than the
+mechanism, and the Status section below says exactly where.
 
 ## One broken thing is one phone call
 
@@ -80,16 +80,81 @@ rule is enforced by the type system: the code that authorizes an action accepts 
 and the only thing that can produce one is the function that fetched it.
 
 **A guess cannot authorize anything either.** Speech is lossy. An action runs only when the call
-completed, the task was completed, confidence clears a floor, the decision validates against the
-requested schema, the named action was actually offered on that call, and, for anything
-destructive, the responder said the confirmation phrase. Any one of those failing is a refusal
-with a reason, recorded, not an error swallowed.
+completed, the task was completed, confidence clears the floor, the decision validates against the
+requested schema, the named action was actually offered on that call and is still permitted by that
+service's policy, the values the responder gave fit what the action declared it accepts, and, for
+anything destructive, the responder said the confirmation phrase. An individual action can demand
+more confidence than the product-wide floor. Any one of those failing is a refusal with a reason,
+recorded, not an error swallowed.
 
 One honest limit on that floor, worth stating rather than leaving implied. The confidence number
 CALL-E returns is its confidence that the task was completed, not its confidence in the specific
 decision it extracted. So the floor filters calls that went badly, and it does not measure how
 sure the transcription is about the word the responder actually said. The schema check, the
 offered-action check and the spoken confirmation phrase are what guard the decision itself.
+
+## What Ringbolt is allowed to do
+
+An action is a row, not a function. It carries what it is called, the sentence the caller reads out
+about it, the exact words that have to be said back before it runs, the values it accepts, what it
+actually does, and how to check afterwards that it worked. Adding one is a `PUT`, not a deploy.
+
+```bash
+curl -X PUT http://localhost:8787/api/config/actions/restart_workers \
+  -H 'content-type: application/json' \
+  -d '{"label":"Restart the workers",
+       "spokenDescription":"restart the workers, which drops every job in flight",
+       "confirmationPhrase":"restart the workers",
+       "minConfidence":0.85,
+       "parameters":[{"name":"reason","description":"why, in their own words","type":"string"}],
+       "target":{"kind":"http","method":"POST",
+                 "url":"https://deploy.harbourworks.net/checkout/restart",
+                 "headers":{"x-api-key":{"fromSecret":"RUNBOOK_SECRET_DEPLOY"}},
+                 "body":{"reason":"{reason}"}},
+       "verify":{"url":"https://deploy.harbourworks.net/checkout/health",
+                 "jsonPath":["status","healthy"],"equals":true}}'
+```
+
+Two kinds of target. **service_state** changes something Ringbolt owns, which is what makes the
+demo real without anybody's credential. **http** reaches another system, and that path is written
+on the assumption that the request changes production:
+
+- HTTPS only, on the ordinary port, with no credentials in the url.
+- No address literals and no names that only exist inside a network, so the cloud metadata endpoint
+  is not reachable through a definition somebody typed in.
+- Redirects are not followed. The host was authorized; a redirect is the target choosing another
+  one afterwards.
+- A response is read up to a bound rather than swallowed whole.
+- One attempt, unless the definition says running it twice is the same as running it once. A
+  request that never came back may have been carried out anyway.
+- Credentials are named bindings, never values in the row. Only a binding called `RUNBOOK_SECRET_*`
+  can be read, so a definition cannot reach the CALL-E key or the admin token.
+- The hosts a deployment may reach at all are in `ACTION_HOST_ALLOWLIST`, which is deployment
+  configuration rather than a database table. That is the same argument as the phone allowlist, and
+  it is also the answer to a public name that resolves to a private address, which a Worker cannot
+  otherwise defend against.
+
+**Values are typed, and the type is the guardrail.** A number spoken over a telephone arrives as
+words, so each value is checked against what the action declared it accepts and refused if it does
+not fit, rather than coerced into whatever the request would have taken. A value the action never
+asked for is a refusal too.
+
+**An action that cannot be confirmed does not resolve the incident.** A service_state action is
+always read back. An http action is checked when its definition says how, and if the request
+succeeded while the check disagrees, the run is recorded as `unverified` and the incident stays
+open for a person. Telling somebody a production problem is fixed because a request returned 200 is
+a claim about the request, not about the system.
+
+Every run lands in one record: the transcript, the decision, who authorized it, the values they
+gave, how many attempts it took, and the system state either side of the change.
+
+```bash
+curl -H "authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:8787/api/audit/incidents/inc_...
+```
+
+That endpoint is behind the admin token because a transcript is personal data and because it is the
+evidence behind a production change.
 
 ## Running it
 
@@ -188,7 +253,14 @@ red, and the clean tree passes all four.
 The behaviour is held to the same standard. Every claim above that a suite is supposed to defend
 was checked by breaking the code on purpose and watching the right test go red: escalating to the
 person already on the call, reusing one idempotency key across attempts, letting one more call
-through the suppression window, and never arming the alarm at all.
+through the suppression window, never arming the alarm at all, dropping an action's own confidence
+floor, ignoring the host allowlist, resolving an incident on a change nothing could confirm,
+retrying a request that may already have been carried out, and substituting a spoken value into a
+request as text rather than into the structure.
+
+Two of those planted faults changed nothing, which was worth more than the ones that worked: both
+guards were being covered by a different rule rather than by a test of their own, and both now have
+one.
 
 ## Layout
 
@@ -196,7 +268,7 @@ through the suppression window, and never arming the alarm at all.
 | ------------- | ------------------------------------------------------------------------------------------ |
 | `src/domain`  | The incident state machine, the decision contract, and the orchestrator. No platform code. |
 | `src/calle`   | The telephone port, the CALL-E adapter, the local stand-in, and the verification step.     |
-| `src/actions` | Runbook actions and their guardrails.                                                      |
+| `src/actions` | What an action definition may say, and the two engines that carry one out.                 |
 | `src/db`      | The D1 schema access layer.                                                                |
 | `src/worker`  | Routing, configuration, and the incident Durable Object.                                   |
 | `docs/adr`    | Why the stack is what it is.                                                               |
@@ -205,14 +277,14 @@ through the suppression window, and never arming the alarm at all.
 
 The loop runs end to end against the local stand-in: an alert becomes an incident, policy decides
 whether it is worth a call, a call is placed to whoever is on the rota, the decision that comes back
-is verified and authorized, the authorized action changes state that can be read back, and a call
-nobody answers moves to the next person on a timer. The CALL-E adapter is built and switchable on,
-and it satisfies the same contract suite as the stand-in.
+is verified and authorized, the authorized action changes a real system and is checked afterwards,
+and a call nobody answers moves to the next person on a timer. Actions are configuration, so what
+can be authorized on a call is something an operator writes down rather than something a deploy
+decides. The CALL-E adapter is built and switchable on, and it satisfies the same contract suite as
+the stand-in.
 
 Not built yet, and not pretended to be:
 
-- Runbook actions as configuration. The two that exist are defined in code, not by an operator, and
-  a policy can only choose between them.
 - The dashboard. The API is there; the screens are not.
 - Authentication and per-tenant isolation. `/api/config` is guarded by one shared admin token, and
   the read API is open. Both are stated here rather than left for somebody to discover.
