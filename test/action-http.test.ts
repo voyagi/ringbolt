@@ -216,6 +216,30 @@ describe("when the far side does not answer properly", () => {
     expect(once.seen).toHaveLength(1);
   });
 
+  /**
+   * The definition schema already refuses more than one attempt unless the action says running it
+   * twice is the same as running it once, so a row like this can only come from somebody writing
+   * straight into the database. The executor holds the same line anyway: the rule is about the far
+   * side of the request, not about the shape of the row that described it.
+   */
+  it("sends once even when a stored row asks for retries it may not have", async () => {
+    const { seen, http } = transport(
+      () => new Response("nope", { status: 503 }),
+    );
+    const { target } = definition({
+      target: { ...restart, idempotent: true, maxAttempts: 3 },
+    });
+
+    const result = await runHttp(
+      { ...target, idempotent: false },
+      null,
+      {},
+      contextWith(http),
+    );
+    expect(result.attempts).toBe(1);
+    expect(seen).toHaveLength(1);
+  });
+
   it("stops on a refusal rather than repeating it", async () => {
     const { seen, http } = transport(
       () => new Response("not allowed", { status: 403 }),
