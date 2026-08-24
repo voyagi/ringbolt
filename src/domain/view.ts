@@ -1,0 +1,403 @@
+/**
+ * Everything the dashboard is allowed to know, and the only module under `src/` that the browser
+ * bundle may import.
+ *
+ * It has no imports of its own, and that is the whole point rather than an accident of size. The
+ * server half of this repo reaches D1, Durable Objects and the CALL-E key, and a single import from
+ * a screen would pull one of them into a file a stranger can read. `.dependency-cruiser.cjs`
+ * enforces the boundary and `src/domain/view.test.ts` enforces the emptiness, because a rule that
+ * allows one module through stops being a boundary the moment that module grows an import.
+ *
+ * The state and severity lists live here rather than in `incident.ts` for the same reason. They are
+ * one list, not two: `incident.ts` re-exports them, so a state added here reaches the state machine
+ * and the interface in the same edit.
+ */
+
+export const incidentStates = [
+  "received",
+  "calling",
+  "deciding",
+  "acting",
+  "deferred",
+  "muted",
+  "escalating",
+  "snoozed",
+  "resolved",
+  "held",
+  "filtered",
+  "failed",
+] as const;
+
+export type IncidentState = (typeof incidentStates)[number];
+
+/**
+ * An incident counts as open while it can still lead to a call. Three things read this: the
+ * duplicate check that decides whether a repeat alert rings a phone, the unique index in migration
+ * 0004 that enforces one open incident per fingerprint, and the board's own count of what is
+ * standing. Change it here and change it in the migration in the same commit, because a state that
+ * is open to one and not the other is a silent second phone call.
+ */
+export const openIncidentStates = [
+  "received",
+  "calling",
+  "deciding",
+  "acting",
+  "deferred",
+  "muted",
+  "escalating",
+  "snoozed",
+] as const satisfies readonly IncidentState[];
+
+/**
+ * States Ringbolt has deliberately parked with a time on them. Each one carries a wakeAt and a
+ * wakeReason, the incident's own Durable Object holds an alarm for it, and the reconciliation sweep
+ * is the backstop for an alarm that never fires.
+ */
+export const scheduledStates = [
+  "deferred",
+  "muted",
+  "snoozed",
+] as const satisfies readonly IncidentState[];
+
+/**
+ * Why an incident is parked, and therefore what happens when its time comes. It is stored on the
+ * incident rather than beside the alarm so that the alarm and the sweep read the same answer.
+ */
+export const wakeReasons = [
+  "no_answer",
+  "snooze_over",
+  "quiet_hours_over",
+  "flap_window_over",
+] as const;
+
+export type WakeReason = (typeof wakeReasons)[number];
+
+export function isWakeReason(value: unknown): value is WakeReason {
+  return (
+    typeof value === "string" &&
+    (wakeReasons as readonly string[]).includes(value)
+  );
+}
+
+/** Most severe first. Everything that compares two severities reads that order from here. */
+export const severities = ["critical", "high", "low"] as const;
+export type Severity = (typeof severities)[number];
+
+export function isSeverity(value: unknown): value is Severity {
+  return (
+    typeof value === "string" &&
+    (severities as readonly string[]).includes(value)
+  );
+}
+
+/** Whether a severity is at least as serious as a floor. */
+export function severityAtLeast(severity: Severity, floor: Severity): boolean {
+  return severities.indexOf(severity) <= severities.indexOf(floor);
+}
+
+/**
+ * The five colours of the instrument panel, plus the neutral. Each one means one state of the
+ * world, never a decoration, which is the rule `design/ART-DIRECTION.md` sets and the reason the
+ * mapping lives in one function instead of in whichever component needed a colour.
+ */
+export const tones = [
+  "live",
+  "cyan",
+  "green",
+  "amber",
+  "violet",
+  "dim",
+] as const;
+export type Tone = (typeof tones)[number];
+
+const stateTone: Record<IncidentState, Tone> = {
+  received: "violet",
+  calling: "live",
+  deciding: "cyan",
+  acting: "cyan",
+  deferred: "amber",
+  muted: "dim",
+  escalating: "amber",
+  snoozed: "amber",
+  resolved: "green",
+  held: "dim",
+  filtered: "dim",
+  failed: "live",
+};
+
+export function toneForState(state: IncidentState): Tone {
+  return stateTone[state];
+}
+
+/**
+ * What each state is called on screen. Upper case because an instrument panel labels its readouts
+ * that way; the CSS does not do it, so a screen reader hears the same words the eye does.
+ */
+const stateLabel: Record<IncidentState, string> = {
+  received: "RECEIVED",
+  calling: "ON THE LINE",
+  deciding: "DECIDING",
+  acting: "ACTING",
+  deferred: "HELD FOR QUIET HOURS",
+  muted: "SUPPRESSED",
+  escalating: "ESCALATING",
+  snoozed: "SNOOZED",
+  resolved: "RESOLVED",
+  held: "HELD",
+  filtered: "FILTERED",
+  failed: "FAILED",
+};
+
+export function labelForState(state: IncidentState): string {
+  return stateLabel[state];
+}
+
+const severityTone: Record<Severity, Tone> = {
+  critical: "live",
+  high: "amber",
+  low: "dim",
+};
+
+export function toneForSeverity(severity: Severity): Tone {
+  return severityTone[severity];
+}
+
+/**
+ * How far through its own deadline a parked or ringing incident is, from 0 to 1, or null when it
+ * has no deadline to run against. The board draws it as a track, and the ring on the live call is
+ * the same number at a larger size.
+ *
+ * `from` is the moment the clock started and `to` the moment it runs out. A deadline already passed
+ * reads as full rather than as more than full: the track is a picture of how much time is left, and
+ * an overrun is not extra time.
+ */
+export function elapsedFraction(
+  from: string | null,
+  to: string | null,
+  now: number,
+): number | null {
+  if (from === null || to === null) return null;
+  const started = Date.parse(from);
+  const ends = Date.parse(to);
+  if (Number.isNaN(started) || Number.isNaN(ends) || ends <= started)
+    return null;
+  return Math.min(1, Math.max(0, (now - started) / (ends - started)));
+}
+
+/** A duration as a clock reads it, for anything that is counting while somebody watches it. */
+export function asClock(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(whole / 60);
+  const rest = whole % 60;
+  if (minutes < 60) return `${pad(minutes)}:${pad(rest)}`;
+  const hours = Math.floor(minutes / 60);
+  return `${pad(hours)}:${pad(minutes % 60)}:${pad(rest)}`;
+}
+
+function pad(value: number): string {
+  return value < 10 ? `0${value}` : String(value);
+}
+
+/**
+ * How long ago something happened, in the words a person would use. Anything in the future reads as
+ * "just now": a clock skew between the monitor that sent the alert and this service is ordinary,
+ * and a negative age on screen reads as a bug in Ringbolt rather than as a clock disagreeing.
+ */
+export function sinceWords(at: string | null, now: number): string | null {
+  if (at === null) return null;
+  const then = Date.parse(at);
+  if (Number.isNaN(then)) return null;
+
+  const seconds = Math.round((now - then) / 1000);
+  if (seconds < 45) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 90) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 36) return hours === 1 ? "1 hour ago" : `${hours} hours ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "1 day ago" : `${days} days ago`;
+}
+
+/**
+ * Speech to text does not preserve punctuation, casing, or filler, so an exact string compare would
+ * refuse phrases a person plainly said. Normalising to words is as loose as this is allowed to get:
+ * the words themselves, in order, still have to be right.
+ *
+ * The authorization gate and the screen that shows which sentence authorized an action both read
+ * this. One normalisation, not two: a screen that highlighted a turn the gate would not have
+ * accepted would be showing evidence for a decision that was made on something else.
+ */
+export function normalisePhrase(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 0)
+    .join(" ");
+}
+
+export function phrasesMatch(spoken: string, required: string): boolean {
+  return normalisePhrase(spoken) === normalisePhrase(required);
+}
+
+export type IncidentLinkView = { label: string; url: string };
+
+/** One incident as every screen reads it. The call id never appears: it is the one value the
+ * unauthenticated webhook route accepts from an anonymous body. */
+export type IncidentView = {
+  id: string;
+  state: IncidentState;
+  service: string;
+  title: string;
+  severity: Severity;
+  detail: string | null;
+  source: string | null;
+  startedAt: string | null;
+  links: IncidentLinkView[];
+  offeredActions: string[];
+  wakeAt: string | null;
+  wakeReason: WakeReason | null;
+  callAttempts: number;
+  rotationPosition: number;
+  callStartedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  outcome: string | null;
+  /** Who is on the phone, or who was. The name, never the number. */
+  contactName: string | null;
+};
+
+export type TranscriptTurnView = {
+  offsetSeconds: number | null;
+  speaker: "bot" | "user" | "unknown";
+  text: string;
+};
+
+export type CallView = {
+  status: string;
+  taskCompleted: boolean | null;
+  confidence: number | null;
+  summary: string | null;
+  transcript: TranscriptTurnView[];
+  recordedAt: string;
+};
+
+export type ActionRunView = {
+  id: string;
+  actionId: string;
+  authorizedBy: string | null;
+  outcome: "succeeded" | "failed" | "unverified";
+  detail: string | null;
+  attempts: number;
+  durationMs: number | null;
+  /** What the check afterwards found, kept whole because it is the evidence, not a summary. */
+  verification: unknown;
+  stateBefore: unknown;
+  stateAfter: unknown;
+  decision: unknown;
+  parameters: unknown;
+  at: string;
+};
+
+export type EventView = {
+  id: string;
+  at: string;
+  kind: string;
+  message: string;
+};
+
+/**
+ * Whether the check that was meant to confirm an action found what it expected, or null when there
+ * was no check to read. Null is a third answer rather than a false: an action recorded as
+ * `unverified` is one nobody has looked at, and drawing that as "did not work" is a different claim
+ * from the one the record makes.
+ */
+export function verifiedFlag(verification: unknown): boolean | null {
+  if (verification === null || typeof verification !== "object") return null;
+  const found = (verification as Record<string, unknown>)["verified"];
+  return typeof found === "boolean" ? found : null;
+}
+
+/** One bucket of the arrival sparkline: how many alerts landed for a service in that window. */
+export type ArrivalBucket = { at: string; alerts: number };
+
+export type DeckFocus = {
+  incident: IncidentView;
+  /** The deadline the ring counts against, which is the escalation clock while a call is live. */
+  call: CallView | null;
+  events: EventView[];
+  actions: ActionRunView[];
+  arrivals: ArrivalBucket[];
+  /** How many repeats of this alert arrived while it was open. */
+  repeats: number;
+};
+
+export type RotaView = {
+  service: string;
+  contacts: { id: string; name: string }[];
+  usesConfiguredNumber: boolean;
+};
+
+export type BudgetView = {
+  realCallsPlaced: number;
+  callPriceUsd: number;
+  spentUsd: number;
+  creditUsd: number;
+  remainingUsd: number;
+  callsRemaining: number;
+};
+
+export type BoardView = {
+  /** The server's clock, so a ring counting seconds counts against it and not the laptop's. */
+  now: string;
+  focus: DeckFocus | null;
+  standing: IncidentView[];
+  counts: {
+    open: number;
+    onTheLine: number;
+    actedToday: number;
+    refusedToday: number;
+  };
+  rota: RotaView;
+  budget: BudgetView;
+};
+
+/**
+ * An action definition as the configuration screen reads it. The three composite fields stay
+ * `unknown` rather than mirroring the zod schema that defines them: the screen shows them as the
+ * JSON an operator edits and hands them straight back, and the server is the only thing that gets
+ * to decide whether a target is valid. A mirror here would be a second, weaker rule that drifts.
+ */
+export type ActionDefinitionView = {
+  id: string;
+  label: string;
+  spokenDescription: string;
+  confirmationPhrase: string | null;
+  minConfidence: number | null;
+  parameters: unknown;
+  target: unknown;
+  verify: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ServicePolicyView = {
+  service: string;
+  minSeverity: Severity;
+  quietHours: unknown;
+  allowedActions: string[];
+  flapWindowMinutes: number;
+  maxCallsPerWindow: number;
+  escalateAfterMinutes: number;
+  updatedAt: string;
+};
+
+export type ContactView = { id: string; name: string; phone: string };
+
+export type AdminMode = "open" | "token" | "unavailable";
+
+export type SessionView = {
+  admin: AdminMode;
+  environment: "development" | "preview" | "production";
+  calleMode: "fake" | "live";
+};

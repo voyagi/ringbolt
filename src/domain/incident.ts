@@ -1,78 +1,26 @@
 import { z } from "zod";
-
-export const incidentStates = [
-  "received",
-  "calling",
-  "deciding",
-  "acting",
-  "deferred",
-  "muted",
-  "escalating",
-  "snoozed",
-  "resolved",
-  "held",
-  "filtered",
-  "failed",
-] as const;
-
-export type IncidentState = (typeof incidentStates)[number];
+import {
+  type IncidentState,
+  type Severity,
+  type WakeReason,
+  severities,
+} from "./view.js";
 
 /**
- * An incident counts as open while it can still lead to a call. Two things read this: the duplicate
- * check that decides whether a repeat alert rings a phone, and the unique index in migration 0004
- * that enforces one open incident per fingerprint. Change it here and change it there in the same
- * commit, because a state that is open to one and not the other is a silent second phone call.
+ * The state and severity lists live in `view.ts`, which the dashboard also reads. They are
+ * re-exported here so every existing caller keeps one import, and so a state added for the state
+ * machine is a state the interface knows how to draw in the same edit.
  */
-export const openIncidentStates = [
-  "received",
-  "calling",
-  "deciding",
-  "acting",
-  "deferred",
-  "muted",
-  "escalating",
-  "snoozed",
-] as const satisfies readonly IncidentState[];
-
-/**
- * States Ringbolt has deliberately parked with a time on them. Each one carries a wakeAt and a
- * wakeReason, the incident's own Durable Object holds an alarm for it, and the reconciliation sweep
- * is the backstop for an alarm that never fires.
- */
-export const scheduledStates = [
-  "deferred",
-  "muted",
-  "snoozed",
-] as const satisfies readonly IncidentState[];
-
-/**
- * Why an incident is parked, and therefore what happens when its time comes. It is stored on the
- * incident rather than beside the alarm so that the alarm and the sweep read the same answer.
- */
-export const wakeReasons = [
-  "no_answer",
-  "snooze_over",
-  "quiet_hours_over",
-  "flap_window_over",
-] as const;
-
-export type WakeReason = (typeof wakeReasons)[number];
-
-export function isWakeReason(value: unknown): value is WakeReason {
-  return (
-    typeof value === "string" &&
-    (wakeReasons as readonly string[]).includes(value)
-  );
-}
-
-/** Most severe first. Everything that compares two severities reads that order from here. */
-export const severities = ["critical", "high", "low"] as const;
-export type Severity = (typeof severities)[number];
-
-/** Whether a severity is at least as serious as a floor. */
-export function severityAtLeast(severity: Severity, floor: Severity): boolean {
-  return severities.indexOf(severity) <= severities.indexOf(floor);
-}
+export {
+  incidentStates,
+  openIncidentStates,
+  scheduledStates,
+  severities,
+  severityAtLeast,
+  wakeReasons,
+  isWakeReason,
+} from "./view.js";
+export type { IncidentState, Severity, WakeReason } from "./view.js";
 
 export const alertPayload = z.object({
   service: z.string().min(1).max(120),

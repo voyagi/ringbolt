@@ -9,15 +9,27 @@ module.exports = {
     {
       name: 'no-ui-to-server',
       severity: 'error',
-      // SECURITY-RELEVANT + LAYOUT-SPECIFIC. These regexes assume an src/ui|client|components vs
-      // src/server split. If they match NO files (a different layout - app/, apps/web/, lib/server),
-      // depcruise reports 0 violations and this protection SILENTLY does not apply (false assurance).
-      // ALWAYS adapt the paths to the real layers AND smoke-test it (plant a ui->server import, see it
-      // fail). Do NOT just broaden to `app/ -> server/`: a Next.js app/ legitimately imports server
-      // code (server components / route handlers), so that would false-positive instead.
-      comment: 'Client/UI code must not import server-only modules (would leak secrets/Node APIs into the bundle).',
-      from: { path: '^src/(ui|client|components)' },
-      to: { path: '^src/server' },
+      // SECURITY-RELEVANT + LAYOUT-SPECIFIC. The scaffold shipped this pointing at `^src/server`,
+      // which does not exist in this repo, so it matched nothing and reported a clean run while
+      // protecting nothing at all. These are Ringbolt's real layers.
+      //
+      // `src/ui` is the browser bundle a stranger can read. Everything named on the `to` side
+      // reaches D1, a Durable Object, the CALL-E key, or a runbook credential, and one import from
+      // a screen would carry it into that bundle.
+      //
+      // `src/domain/view.ts` is the single deliberate exception: it is the contract both halves
+      // read and it has no imports of its own, which `src/domain/view.test.ts` asserts, because a
+      // boundary with one module through it stops being a boundary the moment that module grows an
+      // import. Everything else in `src/domain` pulls zod and the state machine with it.
+      //
+      // Smoke-tested by planting `import { Repo } from "../db/repo.js"` in a screen and watching
+      // this fail, which is the half the scaffold's own comment says is skipped most often.
+      comment: 'The dashboard bundle must not import server-only modules: they carry the database, the telephone credential and the runbook secrets.',
+      from: { path: '^src/ui' },
+      to: {
+        path: '^src/(worker|db|calle|actions|domain)',
+        pathNot: '^src/domain/view\\.ts$',
+      },
     },
     {
       name: 'no-circular',

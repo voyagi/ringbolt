@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ActionParameter, ParameterValue } from "../actions/definition.js";
 import { readParameters } from "../actions/parameters.js";
+import { phrasesMatch } from "./view.js";
 
 /**
  * The shape Ringbolt asks CALL-E to extract from the conversation. It is sent as the call's
@@ -294,22 +295,4 @@ function checkConfirmation<TAction extends OfferedActionLike>(
     };
   }
   return null;
-}
-
-/**
- * Speech to text does not preserve punctuation, casing, or filler, so an exact string compare would
- * refuse phrases a person plainly said. Normalising to words is as loose as this is allowed to get:
- * the words themselves, in order, still have to be right.
- */
-function phrasesMatch(spoken: string, required: string): boolean {
-  return normalisePhrase(spoken) === normalisePhrase(required);
-}
-
-function normalisePhrase(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .split(/\s+/)
-    .filter((word) => word.length > 0)
-    .join(" ");
 }

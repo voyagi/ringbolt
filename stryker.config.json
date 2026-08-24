@@ -9,6 +9,7 @@
     "src/domain/policy.ts",
     "src/domain/rotation.ts",
     "src/domain/incident.ts",
+    "src/domain/view.ts",
     "src/domain/brief.ts",
     "src/actions/parameters.ts"
   ],
