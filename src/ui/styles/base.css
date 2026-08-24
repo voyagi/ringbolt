@@ -1,0 +1,402 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Only the deck pins itself to the viewport. Everything else scrolls the
+   DOCUMENT rather than a box inside it, which is not only simpler: a scrolled
+   inner container leaves an element's page coordinates and its painted position
+   in disagreement, so the accessibility gate's pixel sampling reads the wrong
+   region and reports a black overlay that is not there. */
+html,
+body,
+#deck {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--deck);
+  color: var(--on-deck);
+  font-family: var(--face);
+  font-size: var(--step-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: var(--face-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: var(--cyan);
+}
+
+/* An instrument panel labels its readouts in wide upper case. The letters are typed in upper case
+   rather than transformed, so a screen reader reads the same words the eye does instead of
+   spelling out a lower-case string it was told to shout. */
+.label {
+  font-size: var(--step-label);
+  letter-spacing: var(--track-label);
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.rail {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.75rem var(--pad);
+  border-bottom: 1px solid var(--edge);
+  flex: none;
+}
+
+.mark {
+  font-size: 1.1875rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--on-deck);
+  text-decoration: none;
+}
+
+.mark b {
+  color: var(--live);
+  font-weight: 700;
+}
+
+.rail nav {
+  display: flex;
+  gap: 1.25rem;
+}
+
+/* Below this the rail runs out of room and the last link ends up under the
+   theme control, which axe reports as an obscured element and an operator
+   reports as a link they cannot press. */
+@media (max-width: 46rem) {
+  .rail {
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+  }
+
+  .rail nav {
+    order: 3;
+    width: 100%;
+    gap: 1rem;
+  }
+
+  .rail .trailing {
+    gap: 0.75rem;
+  }
+}
+
+.rail nav a {
+  color: var(--dim);
+  text-decoration: none;
+  padding-bottom: 3px;
+  border-bottom: 2px solid transparent;
+  font-size: var(--step-small);
+}
+
+.rail nav a:hover {
+  color: var(--on-deck);
+}
+
+.rail nav a[aria-current="page"] {
+  color: var(--on-deck);
+  border-bottom-color: var(--live);
+}
+
+.rail .trailing {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  font-size: var(--step-small);
+  color: var(--dim);
+}
+
+.rail .trailing b {
+  color: var(--on-deck);
+  font-weight: 600;
+}
+
+/* Two pulses on connect, then solid. A marker that blinks for ever is a marker nobody reads. */
+.line-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--live);
+  font-weight: 600;
+  font-size: var(--step-label);
+  letter-spacing: 0.1em;
+}
+
+.line-open i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--live);
+  animation: ping 900ms var(--ease) 2;
+}
+
+@keyframes ping {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--live) 0%, transparent);
+  }
+}
+
+.btn {
+  font: inherit;
+  font-weight: 600;
+  font-size: var(--step-small);
+  color: var(--on-panel);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  padding: 0.4375rem 0.875rem;
+  cursor: pointer;
+  transition: transform var(--press) var(--ease);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--dim);
+}
+
+/* Controls depress rather than lift. Nothing in this interface floats. */
+.btn:active:not(:disabled) {
+  transform: translateY(2px);
+}
+
+.btn:disabled {
+  color: var(--dim);
+  cursor: not-allowed;
+}
+
+.btn.primary {
+  background: var(--live);
+  border-color: var(--live);
+  color: var(--on-live);
+}
+
+.btn.quiet {
+  background: transparent;
+  color: var(--dim);
+}
+
+.btn.quiet:hover:not(:disabled) {
+  color: var(--on-deck);
+}
+
+/* Focus is drawn on the deck ground rather than inside the control, so it survives on a panel, on
+   a coloured button, and on a table row alike. */
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  font-size: var(--step-body);
+  color: var(--on-panel);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  padding: 0.4375rem 0.625rem;
+  width: 100%;
+}
+
+textarea {
+  font-family: var(--face-mono);
+  font-size: var(--step-small);
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.field {
+  display: grid;
+  gap: 0.3125rem;
+  margin-bottom: var(--gap);
+}
+
+.field .hint {
+  font-size: var(--step-small);
+  color: var(--dim);
+}
+
+.field .wrong {
+  font-size: var(--step-small);
+  color: var(--live);
+}
+
+/* A fieldset carries a browser border and padding of its own. Stripping them
+   here rather than inline keeps the field's own bottom margin, which an inline
+   `margin: 0` was quietly cancelling. */
+.field.bare {
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.checks {
+  display: grid;
+  gap: 0.375rem;
+  margin-top: 0.375rem;
+}
+
+.checks label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: var(--step-body);
+}
+
+.checks input {
+  width: auto;
+  accent-color: var(--live);
+}
+
+.panel {
+  background: var(--panel);
+  color: var(--on-panel);
+  border: 1px solid var(--edge);
+  padding: var(--pad);
+}
+
+.stack {
+  display: grid;
+  gap: var(--gap);
+}
+
+.row {
+  display: flex;
+  gap: var(--gap);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.tone-live {
+  color: var(--live);
+}
+.tone-cyan {
+  color: var(--cyan);
+}
+.tone-green {
+  color: var(--green);
+}
+.tone-amber {
+  color: var(--amber);
+}
+.tone-violet {
+  color: var(--violet);
+}
+.tone-dim {
+  color: var(--dim);
+}
+
+/* The three states every screen has to have an answer for. They are components rather than a
+   spinner because "nothing yet", "nothing at all" and "this broke" are three different sentences
+   and only one of them means wait. */
+.state {
+  display: grid;
+  gap: 0.5rem;
+  padding: 2.5rem var(--pad);
+  max-width: 34rem;
+}
+
+.state h2 {
+  font-size: var(--step-lead);
+}
+
+.state p {
+  margin: 0;
+  color: var(--dim);
+}
+
+.state.wrong h2 {
+  color: var(--live);
+}
+
+/* A readout that is waiting draws itself as an empty track rather than as a spinner. Nothing in
+   this product turns for its own sake. */
+.waiting {
+  height: 4px;
+  background: var(--track);
+  overflow: hidden;
+  position: relative;
+}
+
+.waiting::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 30%;
+  background: var(--cyan);
+  animation: sweep 1400ms var(--ease) infinite;
+}
+
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(430%);
+  }
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+
+.skip:focus {
+  position: static;
+  display: inline-block;
+  padding: 0.5rem var(--pad);
+  background: var(--panel);
+  color: var(--on-panel);
+}
+
+.page {
+  flex: 1;
+  padding: var(--pad);
+}
+
+.page > header {
+  margin-bottom: var(--pad);
+}
+
+.page > header p {
+  margin: 0.25rem 0 0;
+  color: var(--dim);
+  max-width: 46rem;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* The deck alone. The page never scrolls as a whole: each column owns its own
+   overflow, which is what keeps the ring and the stat strip in place while a
+   long transcript runs underneath them. */
+.shell.pinned {
+  height: 100vh;
+  overflow: hidden;
+}

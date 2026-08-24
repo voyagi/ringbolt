@@ -1,0 +1,214 @@
+/* The screens that are not the deck: history, one incident in full, and the three configuration
+   surfaces. They keep the instrument grid, at a reading rhythm rather than a glance one. */
+
+.grid {
+  display: grid;
+  gap: 1px;
+  background: var(--edge);
+  border: 1px solid var(--edge);
+}
+
+.grid > * {
+  background: var(--panel);
+  color: var(--on-panel);
+  padding: 0.875rem 1rem;
+  min-width: 0;
+}
+
+.log {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--edge);
+}
+
+.log th {
+  text-align: left;
+  font-size: var(--step-label);
+  letter-spacing: var(--track-label);
+  color: var(--dim);
+  font-weight: 600;
+  padding: 0.625rem 0.875rem;
+  border-bottom: 1px solid var(--edge);
+  background: var(--panel);
+}
+
+.log td {
+  padding: 0.625rem 0.875rem;
+  border-bottom: 1px solid var(--edge);
+  background: var(--panel);
+  color: var(--on-panel);
+  vertical-align: top;
+}
+
+.log tbody tr:hover td {
+  background: var(--shade);
+}
+
+.log a {
+  color: var(--on-panel);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.log a:hover {
+  text-decoration: underline;
+}
+
+.log .spine {
+  border-left: 3px solid currentColor;
+}
+
+.filters {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: var(--pad);
+}
+
+.filters button {
+  font: inherit;
+  font-size: var(--step-small);
+  font-weight: 600;
+  padding: 0.3125rem 0.75rem;
+  border: 1px solid var(--edge);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.filters button[aria-pressed="true"] {
+  color: var(--on-deck);
+  border-color: var(--live);
+}
+
+.detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: var(--pad);
+  align-items: start;
+}
+
+@media (max-width: 66rem) {
+  .detail {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  border: 1px solid var(--edge);
+  background: var(--panel);
+  color: var(--on-panel);
+  padding: var(--pad);
+}
+
+/* Scoped to the stacked column on purpose. As a bare sibling rule it also hit
+   the cards laid side by side in `.forms`, where a grid already spaces them, and
+   the second card in every row started a fifth of an inch lower than the first. */
+.detail .card + .card {
+  margin-top: var(--pad);
+}
+
+.card > h2 {
+  font-size: var(--step-label);
+  letter-spacing: var(--track-label);
+  color: var(--dim);
+  font-weight: 600;
+  margin-bottom: 0.875rem;
+}
+
+.pairs {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: 0.5rem 1rem;
+}
+
+.pairs dt {
+  color: var(--dim);
+  font-size: var(--step-small);
+}
+
+.pairs dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.raw {
+  margin: 0;
+  padding: 0.75rem;
+  background: var(--deck);
+  color: var(--on-deck);
+  border: 1px solid var(--edge);
+  font-family: var(--face-mono);
+  font-size: var(--step-small);
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.forms {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr));
+  gap: var(--pad);
+  align-items: start;
+}
+
+.gate {
+  max-width: 26rem;
+  margin: 4rem auto;
+}
+
+.gate h1 {
+  font-size: var(--step-title);
+  margin-bottom: 0.5rem;
+}
+
+.gate p {
+  color: var(--dim);
+  margin: 0 0 var(--pad);
+}
+
+.order {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: seat;
+}
+
+.order li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+.order li .seat {
+  font-family: var(--face-mono);
+  color: var(--dim);
+  width: 1.5rem;
+}
+
+.order li .who {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The number under the name, not welded onto the end of it. */
+.order li .who .note {
+  display: block;
+  margin-top: 0.125rem;
+}
+
+.note {
+  color: var(--dim);
+  font-size: var(--step-small);
+  margin: 0.5rem 0 0;
+}
+
+.saved {
+  color: var(--green);
+  font-size: var(--step-small);
+  font-weight: 600;
+}

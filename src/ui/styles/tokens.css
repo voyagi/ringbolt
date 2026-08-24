@@ -1,0 +1,87 @@
+/* The instrument palette from design/ART-DIRECTION.md. Five semantic colours and a neutral, each
+   meaning one state of the world and never used as decoration.
+
+   Every surface names its own text colour. Reusing a surface colour for text on a different surface
+   is what made the first direction unreadable in one theme, and reading the CSS did not catch it:
+   only the render did. Hence --on-deck and --on-panel as tokens of their own. */
+
+:root,
+[data-theme="dark"] {
+  --deck: #0d1420;
+  --panel: #141d2c;
+  --edge: #23314a;
+  --on-deck: #e8eef8;
+  --on-panel: #e8eef8;
+  --dim: #8695ad;
+  --live: #ff3d71;
+  --cyan: #22d3ee;
+  --green: #29e08a;
+  --amber: #ffb020;
+  --violet: #a78bfa;
+  --track: #23314a;
+  --shade: rgba(255, 255, 255, 0.05);
+  /* Ink on a live-coloured control. White on the night red measures 3.41 to one
+     and fails AA; the deck ground on it measures 5.48. The day red is dark
+     enough that the opposite is true, which is why this is a token and not a
+     colour written into the button. */
+  --on-live: #0d1420;
+}
+
+/* The day palette's live, cyan and amber are darker than the values the direction first locked.
+   Measured against the day deck, the originals came in at 4.36, 4.25 and 4.28 to one, all under the
+   4.5 that AA asks of body text, and all three carry words rather than only rules. */
+[data-theme="light"] {
+  --deck: #f2f5fa;
+  --panel: #ffffff;
+  --edge: #d5dde9;
+  --on-deck: #101828;
+  --on-panel: #101828;
+  --dim: #5d6b82;
+  --live: #c8003a;
+  --cyan: #0b6c8c;
+  --green: #067a4a;
+  --amber: #8f5600;
+  --violet: #6d3fd4;
+  --track: #dde3ee;
+  --shade: rgba(16, 24, 40, 0.04);
+  --on-live: #ffffff;
+}
+
+:root {
+  --face: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --face-mono: "Chivo Mono", ui-monospace, "Cascadia Mono", monospace;
+
+  --step-label: 0.6875rem;
+  --step-small: 0.75rem;
+  --step-body: 0.875rem;
+  --step-lead: 0.9375rem;
+  --step-title: 1.5rem;
+  --step-readout: 3rem;
+
+  --track-label: 0.16em;
+  --track-wide: 0.22em;
+
+  --gap: 0.75rem;
+  --pad: 1.25rem;
+
+  --ease: cubic-bezier(0.22, 0.78, 0.15, 1);
+  --slide: 240ms;
+  --press: 80ms;
+}
+
+/* Every duration goes to zero and every state change survives. An instrument that stops reporting
+   because somebody asked for less movement is worse than one that never moved. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --slide: 0ms;
+    --press: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+  }
+}

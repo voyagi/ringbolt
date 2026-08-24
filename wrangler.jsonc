@@ -4,8 +4,18 @@
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-08-11",
   "compatibility_flags": ["nodejs_compat"],
-  // The dashboard is served from the Worker itself until phase 5 builds the client bundle, at
-  // which point an "assets" binding pointed at ./dist/client replaces the inline page.
+  "assets": {
+    "directory": "./dist/client",
+    // Any path with no file behind it gets the dashboard, so a hard refresh on /incidents/inc_123
+    // lands in the router rather than on a 404.
+    "not_found_handling": "single-page-application",
+    // The Worker runs FIRST on these, and the list is the load-bearing half. Assets are served
+    // ahead of the Worker by default, and the single-page fallback answers anything with no file
+    // behind it, which between them could hand an API path the dashboard's own HTML. Naming the
+    // Worker's prefixes here settles it rather than relying on a precedence rule this repo cannot
+    // test locally.
+    "run_worker_first": ["/api/*", "/intake/*", "/webhooks/*", "/health"]
+  },
   "durable_objects": {
     "bindings": [{ "name": "INCIDENT", "class_name": "IncidentDurableObject" }]
   },

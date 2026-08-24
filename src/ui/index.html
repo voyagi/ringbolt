@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ringbolt</title>
+    <meta
+      name="description"
+      content="The on-call line that phones a human, talks through the incident, and runs the fix they authorize."
+    />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="/mark.svg" type="image/svg+xml" />
+    <script>
+      // Before the first paint, or the deck flashes the wrong theme on every load. It runs ahead of
+      // the bundle on purpose and is the only inline script in the document.
+      (function () {
+        try {
+          var stored = localStorage.getItem("ringbolt-theme");
+          if (stored === "light" || stored === "dark") {
+            document.documentElement.setAttribute("data-theme", stored);
+            return;
+          }
+        } catch (error) {
+          // A browser refusing storage is not a reason to fail to paint.
+        }
+        document.documentElement.setAttribute(
+          "data-theme",
+          window.matchMedia("(prefers-color-scheme: light)").matches
+            ? "light"
+            : "dark",
+        );
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="deck"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>
