@@ -22,13 +22,14 @@ npm run db:migrate:remote
 
 Three values are plain configuration and live in `wrangler.jsonc` under `vars`:
 
-| Name                    | What it does                                                                                  |
-| ----------------------- | --------------------------------------------------------------------------------------------- |
-| `RINGBOLT_ENV`          | `development`, `preview`, or `production`. Outside development, an intake token is required.  |
-| `PUBLIC_BASE_URL`       | The deployed URL. CALL-E sends its webhooks here, so it has to be the real one.               |
-| `CALLE_MODE`            | `fake` dials nothing. `live` places real calls. See below.                                    |
-| `LIVE_CALL_ALLOWLIST`   | Every number a live build may ring, comma separated. `DEMO_PHONE` is always included.         |
-| `ACTION_HOST_ALLOWLIST` | Every host a runbook action may call, comma separated. Outside development, empty means none. |
+| Name                    | What it does                                                                                   |
+| ----------------------- | ---------------------------------------------------------------------------------------------- |
+| `RINGBOLT_ENV`          | `development`, `preview`, or `production`. Outside development, an intake token is required.   |
+| `PUBLIC_BASE_URL`       | The deployed URL. CALL-E sends its webhooks here, so it has to be the real one.                |
+| `CALLE_MODE`            | `fake` dials nothing. `live` places real calls. See below.                                     |
+| `LIVE_CALL_ALLOWLIST`   | Every number a live build may ring, comma separated. `DEMO_PHONE` is always included.          |
+| `ACTION_HOST_ALLOWLIST` | Every host a runbook action may call, comma separated. Outside development, empty means none.  |
+| `CALLE_CREDIT_USD`      | What this deployment may spend on real calls. Empty means nothing, and nothing is the default. |
 
 The rest are secrets, set with `wrangler secret put` and never written to a file in this repository:
 
@@ -161,18 +162,18 @@ are treated as one incident, and only the first rings a phone.
 
 ## Real calls
 
-Live mode reaches an actual telephone, and the CALL-E free tier is twenty calls in total with no
-way to buy a twenty first. Read `/api/budget` before switching it on: it reports how many have been
-placed and how many are left, counted from the ledger row written when a call is accepted.
+Live mode reaches an actual telephone and costs money. CALL-E bills five cents per call task
+created, connected or not. Read `/api/budget` before switching it on: it reports what has been
+spent and what is left, counted from the ledger row written when a call is accepted.
 
 ```bash
 wrangler secret put CALLE_API_KEY   # from https://dashboard.heycall-e.com/account/api-keys
 wrangler secret put DEMO_PHONE      # E.164, for example +31612345678
 ```
 
-Then set `CALLE_MODE` to `live` in `wrangler.jsonc` and deploy. Five things have to be true before a
-call can happen, and each is refused separately rather than failing at the moment a phone should
-ring:
+Then set `CALLE_MODE` to `live` in `wrangler.jsonc`, set `CALLE_CREDIT_USD` to what you are
+prepared to spend, and deploy. Six things have to be true before a call can happen, and each is
+refused separately rather than failing at the moment a phone should ring:
 
 1. `PUBLIC_BASE_URL` is the deployed URL, because that is where CALL-E delivers the outcome. A
    webhook that cannot be delivered leaves the sweep to recover the call a few minutes later.
@@ -184,9 +185,25 @@ ring:
    anybody adds through the configuration endpoint, so without this the set of telephones a
    deployment can reach would be a database table rather than something an operator wrote down. A
    number that is not on it is refused and nothing is sent to CALL-E.
-5. `LIVE_MODE_AVAILABLE` in `src/worker/env.ts` is `true`. Set it to `false` to take the whole
+5. `CALLE_CREDIT_USD` is set to something. It defaults to nothing, so a live build that has not
+   been told what it may spend spends nothing, and says so rather than failing obscurely.
+6. `LIVE_MODE_AVAILABLE` in `src/worker/env.ts` is `true`. Set it to `false` to take the whole
    build off the telephone regardless of what any environment says, which is worth doing when
-   something is looping and the remaining allowance matters more than the alerts.
+   something is looping and the money matters more than the alerts.
 
-Once the allowance is spent, placing a call is refused with the count in the message and nothing is
+Once the credit is spent, placing a call is refused with the figures in the message and nothing is
 sent to CALL-E. Reading calls back keeps working, so incidents already in flight still finish.
+
+Two more things happen on this path, and both were learned the expensive way on 2026-08-22, when
+this build created twenty-three separate call tasks in half an hour.
+
+**There is a ceiling on the rate, not only on the total.** At most three real calls in ten minutes,
+refused before anything is sent. Each of those twenty-three was a different logical call, so no
+per-call check could have refused any of them.
+
+**A create that times out is not a create that did not happen.** The call can already have been
+accepted, and CALL-E confirmed that a repeat carrying a different idempotency key is billed as a
+second, independent call to the same person. So a failed create is sent once more with the same
+key, which returns the call the first one made rather than making another. If neither send can be
+settled, the incident is closed with `call_outcome_unknown` and the record says a call may exist
+that Ringbolt cannot see, which is your cue to look at their dashboard before trying again.

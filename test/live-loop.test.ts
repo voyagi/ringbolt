@@ -19,7 +19,7 @@ import { resetTables } from "./support/reset.js";
  * adapter. Everything on this path is the shipping code: the live placer, the SDK, the request
  * building, the verification step, the authorization gate and the action. Only the socket is
  * replaced, so the branch that only ever runs when a real telephone is involved is not left to be
- * proven by the handful of calls the allowance can pay for.
+ * proven by the handful of calls anybody is willing to pay for.
  */
 const LIVE_ENV = {
   RINGBOLT_ENV: "production",

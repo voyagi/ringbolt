@@ -189,10 +189,21 @@ To place real calls, set `CALLE_MODE=live` with a `CALLE_API_KEY` and a `DEMO_PH
 Configuration is refused if either is missing, so `/health` tells you before an alert does.
 `docs/deploying.md` has the full procedure.
 
-The CALL-E free tier is twenty calls in total and there is no twenty first, so the allowance is
-enforced rather than documented. `/api/budget` reports what is left, the adapter refuses to place a
-call once the count is reached and sends nothing when it refuses, and reading calls back keeps
-working so incidents already in flight still finish.
+CALL-E bills per call task created, at five cents, whether or not it ever connects. So a live build
+spends nothing until `CALLE_CREDIT_USD` says what it may spend, `/api/budget` reports what is left
+in money rather than in calls, and the adapter refuses and sends nothing once that is gone. Reading
+calls back keeps working either way, so incidents already in flight still finish.
+
+There is a second ceiling, on the rate rather than the total: at most three real calls in ten
+minutes. It exists because of a real half hour on 2026-08-22 in which this build created
+twenty-three separate call tasks. Every one of them was a different logical call, so no per-call
+check could have refused any of them, and the thing that was wrong was how fast they were arriving.
+
+That half hour also taught the other rule on this path. A create that times out is not a create
+that did not happen: the call can already have been accepted, and a repeat carrying a fresh
+idempotency key is billed as a second call to the same person. So a failed create is sent once
+more with the SAME key, which returns the call the first one made, and if neither send can be
+settled the incident says a call may exist rather than reporting a clean failure.
 
 A live build also dials only numbers named in `LIVE_CALL_ALLOWLIST`, plus `DEMO_PHONE`, which is
 always on the list. A rotation can name any contact anybody has added, so without that the set of
@@ -224,8 +235,8 @@ finished answer: real authentication is still ahead, and the Status section says
 
 ## The local stand-in
 
-Development runs against a fake CALL-E rather than the real one, because every real call spends
-part of an allowance that cannot be topped up. The fake is deliberately awkward: the call is
+Development runs against a fake CALL-E rather than the real one, because every real call costs
+money and rings somebody's telephone. The fake is deliberately awkward: the call is
 asynchronous, the outcome arrives as a webhook carrying almost nothing, and the real state has to
 be fetched back. Anything that passes against it and then fails against the real API is a gap in
 the fake, not a surprise from the vendor. It stores its calls in the database rather than in

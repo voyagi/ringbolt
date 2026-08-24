@@ -100,7 +100,8 @@ describe("reading the configuration", () => {
 
   /**
    * The one switch that takes the whole build off the telephone, whatever any environment says.
-   * The allowance is twenty calls and cannot be topped up, so it is worth being able to stop.
+   * Every call costs money and a loop spends it faster than anyone can react, so it is worth
+   * being able to stop the whole build at once.
    */
   it("refuses live mode when the build has live calling switched off", () => {
     expect(() => readConfig(live, { liveAvailable: false })).toThrow(

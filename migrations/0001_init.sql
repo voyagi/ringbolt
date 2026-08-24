@@ -59,8 +59,9 @@ CREATE TABLE processed_events (
   received_at TEXT NOT NULL
 );
 
--- The free tier is 20 real calls for the whole project, so spending is counted rather than
--- estimated. One row per real call placed.
+-- CALL-E bills per call task created, so spending is counted rather than estimated. One row per
+-- real call placed. (This comment said "the free tier is 20 real calls" until 2026-08-24, when the
+-- provider confirmed the unit is money at five cents a task, connected or not.)
 CREATE TABLE call_ledger (
   call_id TEXT PRIMARY KEY,
   incident_id TEXT,
