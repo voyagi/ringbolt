@@ -1,7 +1,12 @@
 [
   {
-    "name": "main bundle",
-    "path": "dist/**/*.js",
-    "limit": "150 kB"
+    "name": "dashboard bundle",
+    "path": "dist/client/assets/*.js",
+    "limit": "90 kB"
+  },
+  {
+    "name": "dashboard stylesheet",
+    "path": "dist/client/assets/*.css",
+    "limit": "6 kB"
   }
 ]
