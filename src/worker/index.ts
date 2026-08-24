@@ -195,7 +195,7 @@ app.get("/api/services/:service/state", async (c) => {
 /**
  * Everything that decides which telephone rings sits behind this. It is not authentication, which
  * is phase 7: it is the floor until then, because an unguarded write here is a stranger's phone
- * going off at three in the morning, charged against an allowance of twenty calls.
+ * going off at three in the morning, charged to the owner.
  *
  * The subtree is guarded in one place rather than route by route on purpose. A guard repeated at
  * nine handlers is a guard that will eventually be missing from the tenth.

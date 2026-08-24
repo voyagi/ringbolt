@@ -49,7 +49,7 @@ const shared = {
   /**
    * Which outcome the local stand-in rehearses. The point of a stand-in is the failure modes, not
    * the happy path, so choosing which one it produces is how the escalation and refusal paths get
-   * exercised without spending any of the twenty real calls.
+   * exercised without spending a cent.
    */
   CALLE_FAKE_SCENARIO: blankIsAbsent(
     z.enum(fakeScenarioKinds).default("answers"),
@@ -163,7 +163,8 @@ export function allowedLiveNumbers(config: LiveConfig): string[] {
 
 /**
  * Whether this build may reach a telephone at all. It is a switch rather than a fact about the
- * code, because the real-call allowance is twenty and cannot be topped up: setting this to false
+ * code, because every call costs money and a loop can spend it faster than anyone can react:
+ * setting this to false
  * refuses live mode in every environment at once, without editing configuration that the next
  * deploy would restore.
  */
