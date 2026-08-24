@@ -32,6 +32,14 @@ import {
   allowedActionHosts,
   readConfig,
 } from "./env.js";
+import type { AdminMode, SessionView } from "../domain/view.js";
+import {
+  readBoard,
+  toActionRunView,
+  toCallView,
+  toEventView,
+  toView,
+} from "./board.js";
 import { incidentStub } from "./incident-client.js";
 import { reconcile } from "./reconcile.js";
 import { buildPlacer, newId, waitUntilScheduler } from "./wiring.js";
@@ -60,6 +68,24 @@ app.get("/health", (c) => {
       return c.json({ ok: false, issues: error.issues }, 500);
     throw error;
   }
+});
+
+/**
+ * What the dashboard needs before it can ask for anything else: whether this deployment wants an
+ * administrator token, and which telephone it is wired to.
+ *
+ * It is deliberately outside the admin guard. A screen that cannot tell "you need a token" from
+ * "the server is broken" shows the same spinner for both, and the operator is left guessing at
+ * three in the morning. Nothing here is a secret: it says a token is REQUIRED, never what it is.
+ */
+app.get("/api/session", (c) => {
+  const config = readConfig(c.env);
+  const session: SessionView = {
+    admin: adminMode(config),
+    environment: config.RINGBOLT_ENV,
+    calleMode: config.CALLE_MODE,
+  };
+  return c.json(session);
 });
 
 app.post("/intake/:token", async (c) => {
@@ -427,6 +453,36 @@ app.put("/api/config/rotation/:service", async (c) => {
 });
 
 /**
+ * Every incident, current and closed, as the history screen reads it. It is separate from the open
+ * `/api/incidents` rather than a widening of it: this one names the person who was called, and a
+ * responder's name is not something an unauthenticated read gets to publish.
+ */
+app.get("/api/audit/incidents", async (c) => {
+  const repo = new Repo(c.env.DB);
+  const names = new Map(
+    (await repo.listContacts()).map((one) => [one.id, one.name]),
+  );
+  const incidents = await repo.listIncidents(200);
+  return c.json({
+    incidents: incidents.map((incident) => toView(incident, names)),
+  });
+});
+
+/**
+ * The deck, in one read. It sits behind the admin guard because it carries the live call's
+ * transcript, which is personal data and is also the evidence behind a production change.
+ */
+app.get("/api/audit/board", async (c) => {
+  const config = readConfig(c.env);
+  const board = await readBoard(
+    new Repo(c.env.DB),
+    new Date(),
+    config.CALLE_CREDIT_USD,
+  );
+  return c.json(board);
+});
+
+/**
  * One incident with everything that was decided about it: the timeline, what was said on each
  * call, and every action that ran with the system state either side of it.
  */
@@ -435,11 +491,16 @@ app.get("/api/audit/incidents/:id", async (c) => {
   const incident = await repo.getIncident(c.req.param("id"));
   if (incident === null) return c.json({ error: "no such incident" }, 404);
 
+  const names = new Map(
+    (await repo.listContacts()).map((one) => [one.id, one.name]),
+  );
+  const calls = await repo.listCallRecords(incident.id);
+
   return c.json({
-    incident,
-    events: await repo.listEvents(incident.id),
-    calls: await repo.listCallRecords(incident.id),
-    actions: await repo.listActionRuns(incident.id),
+    incident: toView(incident, names),
+    events: (await repo.listEvents(incident.id)).map(toEventView),
+    calls: calls.map(toCallView),
+    actions: (await repo.listActionRuns(incident.id)).map(toActionRunView),
   });
 });
 
@@ -526,17 +587,26 @@ function unprocessable(
 }
 
 /**
- * Null when the caller may change configuration, and the refusal to send back when they may not.
- * Development with no token set is allowed through because that is a laptop talking to itself;
- * every other environment refuses to serve these routes at all until a token exists, which fails
- * closed rather than shipping an open door nobody notices.
+ * Whether this deployment lets a caller through, wants a token, or refuses these routes outright.
+ *
+ * Development with no token set is a laptop talking to itself; every other environment refuses to
+ * serve them at all until a token exists, which fails closed rather than shipping an open door
+ * nobody notices. The guard below and `/api/session` both read it, so the answer the dashboard is
+ * given and the answer it then meets cannot disagree.
  */
+function adminMode(config: RingboltConfig): AdminMode {
+  if (config.ADMIN_TOKEN !== undefined) return "token";
+  return config.RINGBOLT_ENV === "development" ? "open" : "unavailable";
+}
+
+/** Null when the caller may go on, and the refusal to send back when they may not. */
 function adminRefusal(
   c: Context<{ Bindings: Bindings }>,
   config: RingboltConfig,
 ): Response | null {
-  if (config.ADMIN_TOKEN === undefined) {
-    if (config.RINGBOLT_ENV === "development") return null;
+  const expected = config.ADMIN_TOKEN;
+  if (expected === undefined) {
+    if (adminMode(config) === "open") return null;
     return c.json(
       {
         error:
@@ -548,7 +618,7 @@ function adminRefusal(
 
   const header = c.req.header("authorization") ?? "";
   const presented = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!timingSafeEqual(presented, config.ADMIN_TOKEN))
+  if (!timingSafeEqual(presented, expected))
     return c.json({ error: "not authorized" }, 401);
   return null;
 }

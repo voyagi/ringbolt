@@ -285,6 +285,78 @@ export class Repo {
   }
 
   /**
+   * Everything still on the board, newest first. The dashboard reads this rather than filtering a
+   * page of `listIncidents`, because a busy estate pushes an open incident off the first page and
+   * the board would then quietly stop showing something that is still on fire.
+   */
+  async listOpenIncidents(limit = 50): Promise<Incident[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT * FROM incidents
+         WHERE state IN (${OPEN_STATES})
+         ORDER BY created_at DESC LIMIT ?1`,
+      )
+      .bind(limit)
+      .all<IncidentRow>();
+    return results.map(toIncident);
+  }
+
+  /** How many repeats of an alert arrived while its incident was already open. */
+  async countRepeats(incidentId: string): Promise<number> {
+    const row = await this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM incident_events
+         WHERE incident_id = ?1 AND kind = 'alert.duplicate'`,
+      )
+      .bind(incidentId)
+      .first<{ n: number }>();
+    return row?.n ?? 0;
+  }
+
+  /**
+   * When every alert for a service arrived, most recent window first. The board draws these as the
+   * arrival trace: it is the only time series Ringbolt genuinely holds, since it consumes alerts
+   * rather than measuring anything, and a storm is exactly what it makes visible.
+   */
+  async alertArrivals(service: string, since: string): Promise<string[]> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT e.at AS at FROM incident_events e
+         JOIN incidents i ON i.id = e.incident_id
+         WHERE i.service = ?1 AND e.at >= ?2
+           AND e.kind IN ('alert.received', 'alert.duplicate')
+         ORDER BY e.at ASC`,
+      )
+      .bind(service, since)
+      .all<{ at: string }>();
+    return results.map((row) => row.at);
+  }
+
+  /** How many actions have been carried out since a moment, whatever their outcome. */
+  async countActionRunsSince(at: string): Promise<number> {
+    const row = await this.db
+      .prepare(`SELECT COUNT(*) AS n FROM action_runs WHERE at >= ?1`)
+      .bind(at)
+      .first<{ n: number }>();
+    return row?.n ?? 0;
+  }
+
+  /**
+   * How many decisions Ringbolt declined to act on since a moment. It counts the audit event rather
+   * than an incident state, because a refusal is not a state: an escalated incident and a snoozed
+   * one were both refusals, and a refusal on an incident that has since resolved still happened.
+   */
+  async countRefusalsSince(at: string): Promise<number> {
+    const row = await this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM incident_events WHERE kind = 'action.refused' AND at >= ?1`,
+      )
+      .bind(at)
+      .first<{ n: number }>();
+    return row?.n ?? 0;
+  }
+
+  /**
    * Incidents the sweep should look at, oldest first. Every open state is covered, not just the one
    * waiting on a call: an incident that stops anywhere counts as open, and an open incident answers
    * every later repeat of its alert as a duplicate, so any uncovered state is a way to silence a
