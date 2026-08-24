@@ -5,13 +5,15 @@
   "reporters": ["html", "clear-text", "progress"],
   "coverageAnalysis": "perTest",
   "mutate": [
-    "src/**/{money,pricing,price,billing,invoice,ledger,tax,discount,cart,checkout,order,payment,refund,fee,total,subtotal,amount,currency,coupon,balance,quote,parse,format,calc}*.{ts,tsx}",
-    "!src/**/*.test.*",
-    "!src/**/*.spec.*",
-    "!src/**/*.d.ts"
+    "src/domain/decision.ts",
+    "src/domain/policy.ts",
+    "src/domain/rotation.ts",
+    "src/domain/incident.ts",
+    "src/domain/brief.ts",
+    "src/actions/parameters.ts"
   ],
   "incremental": true,
   "concurrency": 4,
   "thresholds": { "high": 80, "low": 60, "break": null },
-  "vitest": { "configFile": "vitest.config.ts" }
+  "vitest": { "configFile": "vitest.mutation.config.ts" }
 }

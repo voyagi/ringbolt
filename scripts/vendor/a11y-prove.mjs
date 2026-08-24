@@ -55,7 +55,7 @@ import { join } from 'node:path'
 // ===========================================================================
 
 const BUILD_CMD = 'npm run build'
-const GATE_CMD = 'node scripts/a11y-live.mjs'
+const GATE_CMD = 'node scripts/vendor/a11y-live.mjs'
 const DIST = join(process.cwd(), 'dist')
 
 // One entry per defect class the gate claims to catch. `from` must be an exact

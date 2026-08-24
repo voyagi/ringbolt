@@ -41,6 +41,11 @@ export default defineConfig({
     exclude: [
       "**/node_modules/**",
       "**/dist/**",
+      // A mutation run copies the whole project into here, and a crashed one leaves the copy
+      // behind. Without this the next `npm test` collects those copies as well, runs every test
+      // twice, and reports failures from code with a mutant still in it. That happened.
+      "**/.stryker-tmp/**",
+      "**/reports/**",
       "**/*.fault.test.ts",
       "**/*.fault.example.test.ts",
     ],
