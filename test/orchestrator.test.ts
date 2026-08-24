@@ -36,7 +36,12 @@ function snapshotFor(incident: Incident, decision: unknown): VerifiedCall {
     structuredResult: decision,
     summary: "The responder was reached and gave a decision.",
     evidence: [],
-    transcript: [],
+    // A call where somebody was heard. The gate refuses a decision with no responder speech behind
+    // it, so a snapshot with an empty transcript is not a call that reached anybody.
+    transcript: [
+      { offsetSeconds: 0, speaker: "bot", text: "This is Ringbolt." },
+      { offsetSeconds: 8, speaker: "user", text: "Understood." },
+    ],
     metadata: { incident_id: incident.id, service: incident.service },
     failureCode: null,
   } as VerifiedCall;

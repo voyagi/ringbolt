@@ -11,11 +11,21 @@ const offered = [
   { id: "rollback", confirmationPhrase: "roll it back" },
 ];
 
+/** A call where the person answered and was heard. Every case below varies one thing from it. */
+const heard = [
+  {
+    speaker: "bot",
+    text: "This is Ringbolt, an automated system, calling about checkout.",
+  },
+  { speaker: "user", text: "Right. Turn it off." },
+];
+
 const base: AuthorizationInput<(typeof offered)[number]> = {
   callStatus: "completed",
   taskCompleted: true,
   confidenceScore: 0.95,
   structuredResult: { decision: "run_action", action_id: "kill_switch" },
+  transcript: heard,
   offered,
 };
 
@@ -47,6 +57,61 @@ describe("authorize", () => {
       authorized: false,
       refusal: "task_not_completed",
     });
+  });
+
+  /**
+   * The shape all 23 real attempts came back in: Ringbolt talking, the responder's turns present
+   * and empty. Everything else about the call looks perfect, which is the point.
+   */
+  it("refuses when nothing the responder said was transcribed", () => {
+    const result = authorize({
+      ...base,
+      transcript: [
+        { speaker: "bot", text: "This is Ringbolt, calling about checkout." },
+        { speaker: "user", text: "" },
+        { speaker: "bot", text: "Are you still there?" },
+        { speaker: "user", text: "   " },
+      ],
+    });
+    expect(result).toMatchObject({
+      authorized: false,
+      refusal: "responder_not_heard",
+    });
+  });
+
+  it("refuses a call with no transcript at all", () => {
+    expect(authorize({ ...base, transcript: [] })).toMatchObject({
+      authorized: false,
+      refusal: "responder_not_heard",
+    });
+  });
+
+  /**
+   * `unknown` is the provider's own uncertainty about who was speaking. Counting it would let a
+   * call where only Ringbolt was audible authorize a production change on an attribution guess.
+   */
+  it("does not count a turn nobody could attribute to the responder", () => {
+    expect(
+      authorize({
+        ...base,
+        transcript: [
+          { speaker: "bot", text: "Calling about checkout." },
+          { speaker: "unknown", text: "Yes go ahead." },
+        ],
+      }),
+    ).toMatchObject({ authorized: false, refusal: "responder_not_heard" });
+  });
+
+  it("is satisfied by one real thing the responder said", () => {
+    expect(
+      authorize({
+        ...base,
+        transcript: [
+          { speaker: "user", text: "" },
+          { speaker: "user", text: "Kill it." },
+        ],
+      }),
+    ).toMatchObject({ authorized: true });
   });
 
   it("refuses an unknown confidence", () => {
@@ -261,6 +326,7 @@ const spoken: AuthorizationInput<(typeof withParameters)[number]> = {
     action_id: "scale_out",
     action_parameters: { instances: "6" },
   },
+  transcript: heard,
   offered: withParameters,
 };
 

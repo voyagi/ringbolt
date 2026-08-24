@@ -23,6 +23,8 @@ const live = {
   CALLE_MODE: "live",
   CALLE_API_KEY: "test-key-configuration",
   DEMO_PHONE: "+31612345678",
+  CALLE_LOCALE: "en-GB",
+  CALLE_REGION: "NL",
 };
 
 /**
@@ -89,6 +91,27 @@ describe("reading the configuration", () => {
   it("refuses live mode with no number to dial", () => {
     const { DEMO_PHONE: _absent, ...withoutPhone } = live;
     expect(() => readConfig(withoutPhone)).toThrow(ConfigurationError);
+  });
+
+  /**
+   * The same argument as the two above, and the reason it is here rather than defaulted: a default
+   * would be somebody's guess at what language a stranger's incident call is held in, and the 23
+   * attempts that came back silent were all placed with neither of these set.
+   */
+  it("refuses live mode with no language for the conversation", () => {
+    const { CALLE_LOCALE: _absent, ...withoutLocale } = live;
+    expect(() => readConfig(withoutLocale)).toThrow(ConfigurationError);
+    expect(() => readConfig({ ...live, CALLE_LOCALE: "english" })).toThrow(
+      ConfigurationError,
+    );
+  });
+
+  it("refuses live mode with no country for the telephone", () => {
+    const { CALLE_REGION: _absent, ...withoutRegion } = live;
+    expect(() => readConfig(withoutRegion)).toThrow(ConfigurationError);
+    expect(() => readConfig({ ...live, CALLE_REGION: "nl" })).toThrow(
+      ConfigurationError,
+    );
   });
 
   /** The placeholder the stand-in carries. It must never be able to become a real call. */

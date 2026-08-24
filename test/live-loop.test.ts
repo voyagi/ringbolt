@@ -11,7 +11,12 @@ import {
   immediateScheduler,
   unscheduledWakes,
 } from "../src/worker/wiring.js";
-import { type CalleApiStub, calleApiStub } from "./support/calle-api.js";
+import {
+  type CalleApiStub,
+  aRecipient,
+  anAttempt,
+  calleApiStub,
+} from "./support/calle-api.js";
 import { resetTables } from "./support/reset.js";
 
 /**
@@ -28,12 +33,27 @@ const LIVE_ENV = {
   INTAKE_TOKEN: "a-long-enough-intake-token",
   CALLE_API_KEY: "test-key-live-loop",
   DEMO_PHONE: "+31612345678",
+  CALLE_LOCALE: "en-GB",
+  CALLE_REGION: "NL",
   // A dollar, which at five cents a call is twenty of them. A live build with nothing written down
   // here may spend nothing at all, which is the state a fresh deployment starts in.
   CALLE_CREDIT_USD: "1",
 };
 
 const CALLS_IN_THE_CREDIT = 1 / CALL_PRICE_USD;
+
+/**
+ * A conversation both sides took part in, in the shape the API nests it. A decision with no
+ * responder speech behind it is refused, so a call that authorizes anything has to carry this.
+ */
+const heard = [
+  { offset_seconds: 0, speaker: "bot" as const, text: "This is Ringbolt." },
+  {
+    offset_seconds: 11,
+    speaker: "user" as const,
+    text: "Turn it off while we look at it.",
+  },
+];
 
 const alert: AlertPayload = {
   service: "checkout",
@@ -85,6 +105,7 @@ describe("the loop running on the CALL-E adapter", () => {
         reason: "Turn it off while we look at it.",
       },
       summary: "The responder authorized the kill switch.",
+      recipients: [aRecipient([anAttempt({ transcript_turns: heard })])],
     });
 
     // Exactly what the webhook route does: re-read the call from the API under our own key rather
@@ -121,6 +142,7 @@ describe("the loop running on the CALL-E adapter", () => {
       completion_confidence: { score: 0.95, label: "high" },
       structured_result: null,
       summary: "The responder was reached but no decision could be extracted.",
+      recipients: [aRecipient([anAttempt({ transcript_turns: heard })])],
     });
 
     await orchestrator.onCallTerminal(
@@ -162,7 +184,7 @@ describe("the loop running on the CALL-E adapter", () => {
     await liveOrchestrator(api).open(alert);
 
     expect(api.creates[0]?.body["recipients"]).toEqual([
-      { phones: ["+31612345678"] },
+      { phones: ["+31612345678"], locale: "en-GB", region: "NL" },
     ]);
   });
 

@@ -1,5 +1,4 @@
 import type { ActionContext } from "../actions/context.js";
-import { spokenLines } from "../actions/definition.js";
 import { type RunbookAction, actionsAllowedBy } from "../actions/registry.js";
 import {
   type CallPlacer,
@@ -10,6 +9,7 @@ import {
 } from "../calle/port.js";
 import { type VerifiedCall, verifyCall } from "../calle/verify.js";
 import { type Repo, isDuplicateOpenIncident } from "../db/repo.js";
+import { buildTask } from "./brief.js";
 import {
   type Authorization,
   type Refusal,
@@ -22,7 +22,6 @@ import {
   type Incident,
   type IncidentState,
   type WakeReason,
-  describeForSpeech,
   fingerprintFor,
   transition,
 } from "./incident.js";
@@ -207,6 +206,7 @@ export class Orchestrator {
       taskCompleted: snapshot.taskCompleted,
       confidenceScore: snapshot.confidenceScore,
       structuredResult: snapshot.structuredResult,
+      transcript: snapshot.transcript,
       offered: await this.stillOffered(incident, policy),
     });
 
@@ -1113,36 +1113,4 @@ function spokenState(decision: SpokenDecision | undefined): IncidentState {
     default:
       return "escalating";
   }
-}
-
-function buildTask(
-  incident: Incident,
-  offered: readonly RunbookAction[],
-  now: Date,
-): string {
-  const choices = offered.map(spokenLines).join("\n");
-
-  return [
-    // CALL-E refuses to create a task that does not say who the caller is, which is right: a
-    // stranger's telephone ringing at three in the morning with an unnamed voice on it is how a
-    // person hangs up on their own alert. Naming Ringbolt is also the only introduction that makes
-    // the rest of the call make sense, because what follows is a request for authority to act.
-    "You are Ringbolt, an automated on-call line. You telephone the engineer on call when a production system breaks, talk the incident through with them, and carry out the fix they authorize.",
-    `You are calling the engineer on call for ${incident.service}, about a live production problem.`,
-    'Open with one sentence that names you as Ringbolt and says what has broken, for example "This is Ringbolt calling about checkout, payment errors are above twenty percent." Then stop and let them respond.',
-    "",
-    describeForSpeech(incident, now),
-    "",
-    "Answer their questions about the incident using only the facts above. If they ask something you were not told, say plainly that you do not have that detail.",
-    "",
-    "These are the only things you can do for them:",
-    choices,
-    "- hold: change nothing for now.",
-    "- escalate: hand this to someone else.",
-    "- snooze: leave it and call back later, and ask how many minutes.",
-    "",
-    "Read the choices out only if they ask what you can do, or if they have not decided after their questions are answered. Do not push them.",
-    "Where an action asks for a value, ask for it in their own words and report exactly what they said in action_parameters. If they do not give one, leave it out rather than filling it in yourself.",
-    "Before ending the call, say back what you understood the decision to be and get a yes.",
-  ].join("\n");
 }

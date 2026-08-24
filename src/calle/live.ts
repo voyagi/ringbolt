@@ -24,6 +24,14 @@ export type LiveOptions = {
    * operator wrote down, and a caller that forgot to supply one should not compile.
    */
   allowedNumbers: readonly string[];
+  /**
+   * The language the conversation will be held in, as a BCP 47 tag, and the country the telephone
+   * is in. Required for the same reason as the numbers: both are optional to CALL-E, and a build
+   * that leaves them out has quietly let somebody else decide what language its incident calls are
+   * conducted in and which route they take. See `docs/two-way-audio.md`.
+   */
+  locale: string;
+  region: string;
   /** The CALL-E API host. Defaults to the SDK's own, which is the production one. */
   baseUrl?: string;
   fetchImpl?: CalleFetch;
@@ -79,6 +87,8 @@ export class LiveCallPlacer implements CallPlacer {
   private readonly calle: CalleClient;
   private readonly budget: CallBudget;
   private readonly allowedNumbers: ReadonlySet<string>;
+  private readonly locale: string;
+  private readonly region: string;
   private readonly now: () => Date;
 
   constructor(options: LiveOptions) {
@@ -90,6 +100,8 @@ export class LiveCallPlacer implements CallPlacer {
     this.calle = new CalleClient(clientOptions);
     this.budget = options.budget;
     this.allowedNumbers = new Set(options.allowedNumbers);
+    this.locale = options.locale;
+    this.region = options.region;
     this.now = options.now ?? (() => new Date());
   }
 
@@ -122,7 +134,11 @@ export class LiveCallPlacer implements CallPlacer {
     const call = await this.calle.calls.create(
       {
         task: input.task,
-        recipient: { phone: input.phone },
+        recipient: {
+          phone: input.phone,
+          locale: this.locale,
+          region: this.region,
+        },
         resultSchema: input.resultSchema,
         metadata: input.metadata,
         webhookUrl: input.webhookUrl,

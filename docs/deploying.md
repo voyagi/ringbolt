@@ -30,6 +30,8 @@ Three values are plain configuration and live in `wrangler.jsonc` under `vars`:
 | `LIVE_CALL_ALLOWLIST`   | Every number a live build may ring, comma separated. `DEMO_PHONE` is always included.          |
 | `ACTION_HOST_ALLOWLIST` | Every host a runbook action may call, comma separated. Outside development, empty means none.  |
 | `CALLE_CREDIT_USD`      | What this deployment may spend on real calls. Empty means nothing, and nothing is the default. |
+| `CALLE_LOCALE`          | The language the call is held in, BCP 47 with a region, for example `en-GB`. Live mode only.   |
+| `CALLE_REGION`          | The country the telephone is in, two letters, for example `NL`. Live mode only.                |
 
 The rest are secrets, set with `wrangler secret put` and never written to a file in this repository:
 
@@ -172,7 +174,7 @@ wrangler secret put DEMO_PHONE      # E.164, for example +31612345678
 ```
 
 Then set `CALLE_MODE` to `live` in `wrangler.jsonc`, set `CALLE_CREDIT_USD` to what you are
-prepared to spend, and deploy. Six things have to be true before a call can happen, and each is
+prepared to spend, and deploy. Seven things have to be true before a call can happen, and each is
 refused separately rather than failing at the moment a phone should ring:
 
 1. `PUBLIC_BASE_URL` is the deployed URL, because that is where CALL-E delivers the outcome. A
@@ -187,7 +189,10 @@ refused separately rather than failing at the moment a phone should ring:
    number that is not on it is refused and nothing is sent to CALL-E.
 5. `CALLE_CREDIT_USD` is set to something. It defaults to nothing, so a live build that has not
    been told what it may spend spends nothing, and says so rather than failing obscurely.
-6. `LIVE_MODE_AVAILABLE` in `src/worker/env.ts` is `true`. Set it to `false` to take the whole
+6. `CALLE_LOCALE` and `CALLE_REGION` are set, for example `en-GB` and `NL`. CALL-E treats both as
+   optional; this build does not, because every call it has placed without them came back with
+   nothing the responder said transcribed. `docs/two-way-audio.md` is the whole story.
+7. `LIVE_MODE_AVAILABLE` in `src/worker/env.ts` is `true`. Set it to `false` to take the whole
    build off the telephone regardless of what any environment says, which is worth doing when
    something is looping and the money matters more than the alerts.
 

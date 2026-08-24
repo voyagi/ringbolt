@@ -80,7 +80,11 @@ async function resolve(incidentId: string): Promise<void> {
     structuredResult: { decision: "run_action", action_id: "kill_switch" },
     summary: "The responder authorized the kill switch.",
     evidence: [],
-    transcript: [],
+    // An empty transcript is refused: nothing the responder said means nobody authorized anything.
+    transcript: [
+      { offsetSeconds: 0, speaker: "bot", text: "This is Ringbolt." },
+      { offsetSeconds: 8, speaker: "user", text: "Turn it off." },
+    ],
     metadata: { incident_id: incidentId, service: SERVICE },
     failureCode: null,
   } as VerifiedCall);

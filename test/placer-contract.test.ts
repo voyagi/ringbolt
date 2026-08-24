@@ -38,6 +38,8 @@ const implementations: { name: string; build: () => CallPlacer }[] = [
           placedSince: async () => 0,
         },
         allowedNumbers: [CONTRACT_NUMBER],
+        locale: "en-GB",
+        region: "NL",
         // A host that resolves to nothing, so a transport that failed to be installed would fail
         // loudly rather than reach the real API with the suite's made-up key.
         baseUrl: "https://calle.invalid",
