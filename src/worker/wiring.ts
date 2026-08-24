@@ -27,6 +27,19 @@ import {
  */
 const UNCONFIGURED_RESPONDER = "+00000000000";
 
+/**
+ * How long a request to CALL-E may take before we stop waiting for it.
+ *
+ * Their SDK sets no timeout of its own, and a create that hangs is worse than one that fails: the
+ * call may already have been accepted on their side, and every second we wait is a second in which
+ * the incident's other timers can decide something. Twenty seconds is well past a healthy create
+ * and well short of any of our own deadlines.
+ */
+const CALLE_REQUEST_TIMEOUT_MS = 20_000;
+
+const boundedFetch = (request: Request): Promise<Response> =>
+  fetch(request, { signal: AbortSignal.timeout(CALLE_REQUEST_TIMEOUT_MS) });
+
 export function newId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
 }
@@ -114,15 +127,19 @@ export function buildPlacer(
   const now = options.now ?? (() => new Date());
 
   if (config.CALLE_MODE === "live") {
+    const repo = new Repo(env.DB);
     return new LiveCallPlacer({
       apiKey: config.CALLE_API_KEY,
       // The ledger is what the product reports at /api/budget, so the ceiling and the published
       // figure are the same count rather than two that can disagree.
-      budget: { spent: () => new Repo(env.DB).countRealCalls() },
+      budget: {
+        creditUsd: config.CALLE_CREDIT_USD,
+        spent: () => repo.countRealCalls(),
+        placedSince: (iso) => repo.countRealCallsSince(iso),
+      },
       allowedNumbers: allowedLiveNumbers(config),
-      ...(options.calleFetch === undefined
-        ? {}
-        : { fetchImpl: options.calleFetch }),
+      now,
+      fetchImpl: options.calleFetch ?? boundedFetch,
     });
   }
 

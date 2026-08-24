@@ -1,9 +1,10 @@
 import { SELF, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import type {
-  CallPlacer,
-  CallSnapshot,
-  PlaceCallInput,
+import {
+  type CallPlacer,
+  type CallSnapshot,
+  CallNotAttemptedError,
+  type PlaceCallInput,
 } from "../src/calle/port.js";
 import type { VerifiedCall } from "../src/calle/verify.js";
 import { Repo } from "../src/db/repo.js";
@@ -261,6 +262,64 @@ describe("what the responder said decides where the incident lands", () => {
   });
 });
 
+/**
+ * A create that failed is not a create that did not happen. CALL-E confirmed on 2026-08-24 that a
+ * response which never reaches the client does not cancel a call they already accepted, and that a
+ * repeat carrying a different key is billed as a separate call. So the repeat carries the same key,
+ * and a refusal raised before anything went out is not repeated at all.
+ */
+describe("a request that may or may not have reached the provider", () => {
+  beforeEach(async () => {
+    await resetTables(env.DB);
+  });
+
+  function recordingPlacer(fail: () => Error): {
+    placer: CallPlacer;
+    sent: string[];
+  } {
+    const sent: string[] = [];
+    return {
+      sent,
+      placer: {
+        ...stubPlacer("live"),
+        async place(input: PlaceCallInput): Promise<CallSnapshot> {
+          sent.push(input.idempotencyKey);
+          throw fail();
+        },
+      },
+    };
+  }
+
+  it("sends it exactly twice, under one key, and says the outcome is unknown", async () => {
+    const { placer, sent } = recordingPlacer(
+      () => new Error("The operation was aborted due to timeout"),
+    );
+
+    const result = await orchestratorWith(placer).open(alert);
+
+    expect(sent).toHaveLength(2);
+    expect(new Set(sent).size).toBe(1);
+    expect(result.incident.outcome).toBe("call_outcome_unknown");
+    expect(result.kind === "call_failed" && result.detail).toContain(
+      "a call may exist",
+    );
+  });
+
+  it("does not repeat one our own guards refused, because nothing was sent", async () => {
+    const { placer, sent } = recordingPlacer(
+      () => new CallNotAttemptedError("that number is not on the list"),
+    );
+
+    const result = await orchestratorWith(placer).open(alert);
+
+    expect(sent).toHaveLength(1);
+    expect(result.incident.outcome).toBe("call_place_refused");
+    expect(result.kind === "call_failed" && result.detail).not.toContain(
+      "may exist",
+    );
+  });
+});
+
 describe("a telephone that will not dial", () => {
   beforeEach(async () => {
     await resetTables(env.DB);
@@ -288,19 +347,24 @@ describe("a telephone that will not dial", () => {
   });
 });
 
+/**
+ * The product reports money, because money is what CALL-E charges: a call task costs five cents
+ * whether or not it ever connects. It reported a count against a hardcoded allowance of twenty
+ * until 2026-08-24, which was a figure nobody had chosen measuring a thing nobody is billed for.
+ */
 describe("the real-call budget", () => {
   beforeEach(async () => {
     await resetTables(env.DB);
   });
 
-  it("counts a call placed by a real placer", async () => {
+  it("counts what a call placed by a real placer costs", async () => {
     await orchestratorWith(stubPlacer("live")).open(alert);
 
     const budget = await SELF.fetch("https://ringbolt.test/api/budget");
     expect(await budget.json()).toMatchObject({
       realCallsPlaced: 1,
-      freeTierTotal: 20,
-      remaining: 19,
+      callPriceUsd: 0.05,
+      spentUsd: 0.05,
     });
   });
 
@@ -310,7 +374,17 @@ describe("the real-call budget", () => {
     const budget = await SELF.fetch("https://ringbolt.test/api/budget");
     expect(await budget.json()).toMatchObject({
       realCallsPlaced: 0,
-      remaining: 20,
+      spentUsd: 0,
+    });
+  });
+
+  /** The test environment has no credit configured, and that is what a fresh deployment looks like. */
+  it("reports nothing to spend until somebody says what may be spent", async () => {
+    const budget = await SELF.fetch("https://ringbolt.test/api/budget");
+    expect(await budget.json()).toMatchObject({
+      creditUsd: 0,
+      remainingUsd: 0,
+      callsRemaining: 0,
     });
   });
 });

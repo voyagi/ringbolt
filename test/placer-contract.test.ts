@@ -32,7 +32,11 @@ const implementations: { name: string; build: () => CallPlacer }[] = [
     build: () =>
       new LiveCallPlacer({
         apiKey: "test-key-contract-suite",
-        budget: { spent: async () => 0 },
+        budget: {
+          creditUsd: 1,
+          spent: async () => 0,
+          placedSince: async () => 0,
+        },
         allowedNumbers: [CONTRACT_NUMBER],
         // A host that resolves to nothing, so a transport that failed to be installed would fail
         // loudly rather than reach the real API with the suite's made-up key.
