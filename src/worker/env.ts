@@ -91,6 +91,33 @@ const envSchema = z.discriminatedUnion("CALLE_MODE", [
     CALLE_API_KEY: blankIsAbsent(z.string().min(1)),
     DEMO_PHONE: blankIsAbsent(phoneNumber),
     /**
+     * What language the conversation will be held in, and where the telephone is. CALL-E takes the
+     * first as a hint to the conversation and the second for routing and compliance, and both are
+     * optional to them.
+     *
+     * They are required here because leaving them out is the only configuration difference between
+     * this build and one that works, and 23 consecutive calls came back with the responder's turns
+     * carrying no text at all. That is not proof, and `docs/two-way-audio.md` says exactly how far
+     * the evidence goes, but a call placed without saying what language it is in or which country
+     * the phone is in is a call nobody decided the shape of.
+     */
+    CALLE_LOCALE: blankIsAbsent(
+      z
+        .string()
+        .regex(
+          /^[a-z]{2,3}(-[A-Z][a-z]{3})?-[A-Z]{2}$/,
+          "must be a BCP 47 locale with a region, for example en-US or nl-NL",
+        ),
+    ),
+    CALLE_REGION: blankIsAbsent(
+      z
+        .string()
+        .regex(
+          /^[A-Z]{2}$/,
+          "must be a two letter ISO 3166-1 country code, for example NL",
+        ),
+    ),
+    /**
      * Every number this build may ring, comma separated. The rotation can name any contact anyone
      * has added through the configuration endpoint, so without this the set of telephones a live
      * build can reach is a database table. It is a short list in the deployment configuration

@@ -72,9 +72,12 @@ export const unscheduledWakes: WakeScheduler = {
 
 /** What the stand-in does on a call, chosen by configuration rather than by the code path. */
 function scenarioOf(kind: FakeScenarioKind, afterMs: number): FakeScenario {
-  if (kind !== "answers") return { kind, afterMs };
+  // The two scenarios that reach the authorization gate with something in them need a decision to
+  // carry. They carry the SAME one on purpose: the only difference between them is whether the
+  // person was heard saying it, which is the whole question one_way_audio exists to ask.
+  if (kind !== "answers" && kind !== "one_way_audio") return { kind, afterMs };
   return {
-    kind: "answers",
+    kind,
     afterMs,
     decision: {
       decision: "run_action",
@@ -138,6 +141,8 @@ export function buildPlacer(
         placedSince: (iso) => repo.countRealCallsSince(iso),
       },
       allowedNumbers: allowedLiveNumbers(config),
+      locale: config.CALLE_LOCALE,
+      region: config.CALLE_REGION,
       now,
       fetchImpl: options.calleFetch ?? boundedFetch,
     });

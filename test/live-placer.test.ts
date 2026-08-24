@@ -42,6 +42,8 @@ function placerWith(
         placedSince: async () => budget.recent ?? 0,
       },
       allowedNumbers,
+      locale: "en-GB",
+      region: "NL",
       baseUrl: "https://calle.invalid",
       fetchImpl: api.fetch,
     }),
@@ -66,7 +68,9 @@ describe("what the adapter puts on the wire", () => {
 
     const sent = api.creates[0];
     expect(sent?.body["task"]).toContain("Checkout is returning errors");
-    expect(sent?.body["recipients"]).toEqual([{ phones: ["+31612345678"] }]);
+    expect(sent?.body["recipients"]).toEqual([
+      { phones: ["+31612345678"], locale: "en-GB", region: "NL" },
+    ]);
     expect(sent?.body["webhook_url"]).toBe(
       "https://ringbolt.example.com/webhooks/calle",
     );
@@ -74,6 +78,23 @@ describe("what the adapter puts on the wire", () => {
       incident_id: "inc_live_1",
       service: "checkout",
     });
+  });
+
+  /**
+   * Both are optional to CALL-E and both were absent from every call this product has ever placed,
+   * all 23 of which came back with nothing the responder said transcribed. `docs/two-way-audio.md`
+   * says how far that evidence goes; this test is what stops them quietly going missing again.
+   */
+  it("says what language the call is in and which country the phone is in", async () => {
+    const { placer, api } = placerWith(calleApiStub());
+    await placer.place(anIncidentCall());
+
+    const recipient = (
+      api.creates[0]?.body["recipients"] as
+        Record<string, unknown>[] | undefined
+    )?.[0];
+    expect(recipient?.["locale"]).toBe("en-GB");
+    expect(recipient?.["region"]).toBe("NL");
   });
 
   /**
@@ -389,6 +410,8 @@ describe("how fast this build may call", () => {
         },
       },
       allowedNumbers: [OWNED_NUMBER],
+      locale: "en-GB",
+      region: "NL",
       baseUrl: "https://calle.invalid",
       fetchImpl: api.fetch,
       now: () => new Date("2026-08-22T12:30:00.000Z"),

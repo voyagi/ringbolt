@@ -15,6 +15,7 @@ export const fakeScenarioKinds = [
   "no_answer",
   "hangs_up",
   "unparseable",
+  "one_way_audio",
 ] as const;
 
 export type FakeScenarioKind = (typeof fakeScenarioKinds)[number];
@@ -28,7 +29,13 @@ export type FakeScenario =
     }
   | { kind: "no_answer"; afterMs?: number }
   | { kind: "hangs_up"; afterMs?: number }
-  | { kind: "unparseable"; afterMs?: number };
+  | { kind: "unparseable"; afterMs?: number }
+  | {
+      kind: "one_way_audio";
+      decision: Record<string, unknown>;
+      confidence?: number;
+      afterMs?: number;
+    };
 
 /**
  * The fake keeps its calls somewhere both the caller and the webhook receiver can read, because
@@ -96,6 +103,40 @@ export class D1FakeCallStore implements FakeCallStore {
       )
       .run();
   }
+}
+
+/**
+ * A call that reached somebody and came back with a decision in it. The two scenarios that produce
+ * one are identical apart from the transcript, which is the entire point of the second: everything
+ * a gate can check looks the same, and only the record of who spoke says they are different calls.
+ */
+function decided(
+  confidence: number,
+  decision: Record<string, unknown>,
+): Pick<
+  CallSnapshot,
+  | "status"
+  | "taskCompleted"
+  | "confidenceScore"
+  | "confidenceLabel"
+  | "structuredResult"
+  | "summary"
+  | "evidence"
+> {
+  return {
+    status: "completed",
+    taskCompleted: true,
+    confidenceScore: confidence,
+    confidenceLabel: confidence >= 0.8 ? "high" : "medium",
+    structuredResult: decision,
+    summary: "The responder was reached and gave a decision.",
+    evidence: ["responder confirmed the decision out loud"],
+  };
+}
+
+/** What the caller is heard saying. Bounded, because a transcript turn is a line, not a script. */
+function opening(input: PlaceCallInput): string {
+  return input.task.slice(0, 200);
 }
 
 export type FakeOptions = {
@@ -176,23 +217,12 @@ export class FakeCallPlacer implements CallPlacer {
     };
 
     switch (scenario.kind) {
-      case "answers": {
-        const confidence = scenario.confidence ?? 0.92;
+      case "answers":
         return {
           ...base,
-          status: "completed",
-          taskCompleted: true,
-          confidenceScore: confidence,
-          confidenceLabel: confidence >= 0.8 ? "high" : "medium",
-          structuredResult: scenario.decision,
-          summary: "The responder was reached and gave a decision.",
-          evidence: ["responder confirmed the decision out loud"],
+          ...decided(scenario.confidence ?? 0.92, scenario.decision),
           transcript: [
-            {
-              offsetSeconds: 0,
-              speaker: "bot",
-              text: input.task.slice(0, 200),
-            },
+            { offsetSeconds: 0, speaker: "bot", text: opening(input) },
             {
               offsetSeconds: 9,
               speaker: "user",
@@ -200,7 +230,6 @@ export class FakeCallPlacer implements CallPlacer {
             },
           ],
         };
-      }
       case "no_answer":
         return {
           ...base,
@@ -233,6 +262,27 @@ export class FakeCallPlacer implements CallPlacer {
           structuredResult: { decision: "do the thing", whatever: true },
           summary:
             "A decision was reached but it did not match the requested shape.",
+        };
+      /**
+       * The call the product has actually made 23 times and never once completed: Ringbolt talks,
+       * the transcript carries the responder's turns with no text and no duration, and nothing the
+       * person said is anywhere in the record.
+       *
+       * The transcript half is what was observed. The rest is deliberately the most dangerous shape
+       * it could be paired with: task completed, high confidence, and a schema-valid decision to
+       * change production. A guard is worth having only if it holds when everything else looks
+       * right, and this is the pairing that says whether it does.
+       */
+      case "one_way_audio":
+        return {
+          ...base,
+          ...decided(scenario.confidence ?? 0.94, scenario.decision),
+          transcript: [
+            { offsetSeconds: 0, speaker: "bot", text: opening(input) },
+            { offsetSeconds: 0, speaker: "user", text: "" },
+            { offsetSeconds: 0, speaker: "bot", text: "Are you still there?" },
+            { offsetSeconds: 0, speaker: "user", text: "" },
+          ],
         };
     }
   }

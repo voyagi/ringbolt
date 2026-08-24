@@ -88,6 +88,11 @@ export type AuthorizationInput<TAction extends OfferedActionLike> = {
   confidenceScore: number | null;
   structuredResult: unknown;
   /**
+   * What was said on the call. Taken as the plain shape rather than the adapter's type, like
+   * callStatus above, so the gate stays a pure function of what a call reported.
+   */
+  transcript: readonly { speaker: string; text: string }[];
+  /**
    * The actions that were read out on this call. Authorization returns the matching member of this
    * array rather than an id, so the set that permits an action and the set that supplies the one
    * that runs are the same objects. A separate lookup afterwards is how a per-service policy grows
@@ -119,6 +124,7 @@ export type Refusal<TAction extends OfferedActionLike> = Extract<
 export type RefusalReason =
   | "call_not_completed"
   | "task_not_completed"
+  | "responder_not_heard"
   | "confidence_below_floor"
   | "result_not_schema_valid"
   | "not_an_action_decision"
@@ -149,6 +155,15 @@ export function authorize<TAction extends OfferedActionLike>(
       authorized: false,
       refusal: "task_not_completed",
       detail: "the call ended without the task being completed",
+    };
+  }
+
+  if (!responderWasHeard(input.transcript)) {
+    return {
+      authorized: false,
+      refusal: "responder_not_heard",
+      detail:
+        "the call completed but not one word from the person who answered was transcribed, so there is no evidence anybody authorized anything",
     };
   }
 
@@ -231,6 +246,26 @@ export function authorize<TAction extends OfferedActionLike>(
   }
 
   return { authorized: true, decision, action, parameters: read.values };
+}
+
+/**
+ * Whether the person on the other end said anything the call actually captured.
+ *
+ * Every one of the 23 attempts made on 2026-08-22 came back with the responder's turns present and
+ * empty: no text, no duration. A call in that state can still report the task completed with high
+ * confidence and a schema-valid decision in it, and every other check in this function would pass
+ * it, so a production change would run on a conversation that only one side of took part in.
+ *
+ * A `bot` turn does not count, and neither does `unknown`: the point is evidence that the human was
+ * heard, and an unattributed turn is the machine's own guess about who was speaking. Refusing here
+ * escalates rather than acts, which on a channel this broken means a person is telephoned about it.
+ */
+function responderWasHeard(
+  transcript: readonly { speaker: string; text: string }[],
+): boolean {
+  return transcript.some(
+    (turn) => turn.speaker === "user" && turn.text.trim() !== "",
+  );
 }
 
 function checkConfirmation<TAction extends OfferedActionLike>(

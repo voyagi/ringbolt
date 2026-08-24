@@ -159,7 +159,11 @@ export function calleApiStub(): CalleApiStub {
 
 function queuedCall(id: string, body: Record<string, unknown>): ApiCall {
   const recipients = Array.isArray(body["recipients"])
-    ? (body["recipients"] as { phones?: string[] }[])
+    ? (body["recipients"] as {
+        phones?: string[];
+        locale?: string;
+        region?: string;
+      }[])
     : [];
 
   return {
@@ -167,11 +171,13 @@ function queuedCall(id: string, body: Record<string, unknown>): ApiCall {
     object: "call_task",
     status: "queued",
     task: typeof body["task"] === "string" ? body["task"] : "",
+    // The API reports back the locale and region it used, so the stub echoes what it was sent
+    // rather than reporting null and hiding a field that never left the client.
     recipients: recipients.map((recipient, index) => ({
       id: `rcp_${index + 1}`,
       phones: recipient.phones ?? [],
-      locale: null,
-      region: null,
+      locale: recipient.locale ?? null,
+      region: recipient.region ?? null,
       status: "pending",
       structured_result: null,
       summary: null,

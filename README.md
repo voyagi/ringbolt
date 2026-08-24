@@ -87,6 +87,14 @@ anything destructive, the responder said the confirmation phrase. An individual 
 more confidence than the product-wide floor. Any one of those failing is a refusal with a reason,
 recorded, not an error swallowed.
 
+**And silence cannot authorize anything.** A call has to carry at least one thing the responder
+actually said before any of the above is even considered. A transcript where only Ringbolt was
+heard is refused as `responder_not_heard`, and a turn the provider could not attribute to anybody
+does not count towards it. This is not a hypothetical: every call this product has placed so far
+came back with the responder's turns present and empty, and such a call can still report the task
+completed at high confidence with a schema-valid decision in it. `docs/two-way-audio.md` has the
+evidence, what was ruled out, and what a live call would settle.
+
 One honest limit on that floor, worth stating rather than leaving implied. The confidence number
 CALL-E returns is its confidence that the task was completed, not its confidence in the specific
 decision it extracted. So the floor filters calls that went badly, and it does not measure how
@@ -185,9 +193,13 @@ curl http://localhost:8787/api/incidents
 curl http://localhost:8787/api/services/checkout/state
 ```
 
-To place real calls, set `CALLE_MODE=live` with a `CALLE_API_KEY` and a `DEMO_PHONE` in E.164.
-Configuration is refused if either is missing, so `/health` tells you before an alert does.
+To place real calls, set `CALLE_MODE=live` with a `CALLE_API_KEY`, a `DEMO_PHONE` in E.164, and the
+`CALLE_LOCALE` and `CALLE_REGION` the call will be held in, for example `en-GB` and `NL`.
+Configuration is refused if any of them is missing, so `/health` tells you before an alert does.
 `docs/deploying.md` has the full procedure.
+
+The last two are optional to CALL-E and required here, which is a deliberate difference:
+`docs/two-way-audio.md` explains what happened on the calls that were placed without them.
 
 CALL-E bills per call task created, at five cents, whether or not it ever connects. So a live build
 spends nothing until `CALLE_CREDIT_USD` says what it may spend, `/api/budget` reports what is left
@@ -209,6 +221,16 @@ A live build also dials only numbers named in `LIVE_CALL_ALLOWLIST`, plus `DEMO_
 always on the list. A rotation can name any contact anybody has added, so without that the set of
 telephones a deployment can reach would be a database table rather than something an operator wrote
 down.
+
+## What the person on the phone is told
+
+Every call opens by saying it is Ringbolt and that it is an automated system rather than a person,
+before any of the incident facts. It is one of the instructions in the brief that goes out with the
+call, so there is no setting that turns it off, and a test asserts it is there and that it comes
+first.
+
+That is EU AI Act Article 50(1), which has applied since 2 August 2026. The determination, and the
+three neighbouring paragraphs that do not apply and why, are in `docs/ai-act.md`.
 
 ## Who gets called
 
@@ -267,7 +289,11 @@ person already on the call, reusing one idempotency key across attempts, letting
 through the suppression window, never arming the alarm at all, dropping an action's own confidence
 floor, ignoring the host allowlist, resolving an incident on a change nothing could confirm,
 retrying a request that may already have been carried out, and substituting a spoken value into a
-request as text rather than into the structure.
+request as text rather than into the structure. The rules about who was heard on a call were held
+to the same standard: counting whitespace as speech, counting an unattributed turn as the
+responder, removing the check, handing the gate a transcript the orchestrator made up, dropping the
+locale or the region from the outgoing call, and dropping the disclosure from the brief each turn
+the right test red.
 
 Two of those planted faults changed nothing, which was worth more than the ones that worked: both
 guards were being covered by a different rule rather than by a test of their own, and both now have
@@ -293,6 +319,13 @@ and a call nobody answers moves to the next person on a timer. Actions are confi
 can be authorized on a call is something an operator writes down rather than something a deploy
 decides. The CALL-E adapter is built and switchable on, and it satisfies the same contract suite as
 the stand-in.
+
+One thing has not been proven on a real telephone, and this is the place to say so rather than
+leave it to be discovered: no call this product has placed has yet been a two way conversation.
+Ringbolt was heard on all of them and the responder was not. The product's answer to that is to
+refuse to act on such a call, which is tested; the cause is still open, and
+`docs/two-way-audio.md` says exactly how far the evidence goes and what the next live call would
+settle.
 
 Not built yet, and not pretended to be:
 
