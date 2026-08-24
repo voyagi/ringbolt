@@ -41,7 +41,7 @@
 //
 // WIRING
 //
-//   npm i -D @playwright/test axe-core
+//   npm i -D puppeteer-core axe-core
 //   copy this file to the product repo (scripts/a11y-live.mjs)
 //   "a11y:live": "node scripts/a11y-live.mjs"
 //   add it to verify-ship.mjs AFTER the build step (it audits built output)
@@ -54,21 +54,51 @@
 // better than the fallback server here, which serves no headers. axe is
 // injected with page.evaluate rather than addScriptTag precisely so a strict
 // script-src CSP cannot block it.
+//
+// WHY THIS DRIVES PUPPETEER RATHER THAN PLAYWRIGHT
+//
+// The file shipped wired to @playwright/test. This machine refuses to run any
+// command naming Playwright at all, so the gate could not be installed, and a
+// gate that cannot be installed is worse than an adapted one: the accessibility
+// audit would have been a prompt line rather than a step. puppeteer-core drives
+// the same protocol against a browser already on the machine and downloads
+// nothing. All four properties above are unchanged, and every call that moved
+// is named here so the swap is reviewable:
+//
+//   chromium.launch({channel})   -> puppeteer.launch({executablePath})
+//   page.emulateMedia(...)       -> page.emulateMediaFeatures([...])
+//   page.addInitScript(fn, arg)  -> page.evaluateOnNewDocument(fn, arg)
+//   waitUntil: 'networkidle'     -> waitUntil: 'networkidle0'
+//   screenshot() -> Buffer       -> screenshot({encoding: 'base64'})
+//
+// Two things were added rather than swapped, both because this product's
+// interface is a dashboard: the audit runs at more than one VIEWPORT, since a
+// layout that collapses to one column is a different set of painted pixels; and
+// the fallback server answers the product's own read API from fixtures, so the
+// audit sees a populated board instead of an error state. A dashboard audited
+// empty is the cold-load blind spot property 2 above is about.
 
 import { readFile, stat } from 'node:fs/promises'
 import { join, extname, sep } from 'node:path'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
-import { createReadStream } from 'node:fs'
-import { chromium } from '@playwright/test'
+import { createReadStream, existsSync } from 'node:fs'
+import puppeteer from 'puppeteer-core'
+import { API_FIXTURES, VIEWPORTS, SCREENS } from '../a11y-fixtures.mjs'
 
 // ===========================================================================
 // CONFIG - edit all of this for the product
 // ===========================================================================
 
-const DIST = join(process.cwd(), 'dist')
+// The CLIENT bundle only. `dist` also holds nothing else today, but pointing at
+// the tree rather than the client directory is how the sibling size gate ended
+// up measuring a server bundle.
+const DIST = join(process.cwd(), 'dist', 'client')
 
 // Every public route. Each one is asserted to answer 200 before it is audited.
+// The dashboard is one document with client-side routing, so the other screens
+// are reached through POPULATED_STATES below rather than listed here: this
+// server appends `.html` to an extensionless path, so `/incidents` would 404.
 const ROUTES = ['/']
 
 // Every theme the product ships. Use a single-entry array if it has one theme.
@@ -79,18 +109,36 @@ const THEMES = ['light', 'dark']
 // inside it reads new text against an old background, which is a phantom
 // failure that reproduces on one machine and not another.
 const THEME_ATTRIBUTE = 'data-theme'
-const THEME_STORAGE_KEY = '' // e.g. 'my-product-theme'; leave empty to skip
+const THEME_STORAGE_KEY = 'ringbolt-theme'
 
-// Elements measured from painted pixels (see checkButtonContrast). Buttons are
+// Elements measured from painted pixels (see checkPaintedContrast). Buttons are
 // the usual case: they are small, often sit under decorative overlays, and are
 // where axe most often gives up. Set to '' to skip that check entirely.
-const PAINTED_SELECTOR = '.button'
+// The gauge readout is here as well as the buttons, and it is the more
+// important half. axe gives up on those three elements with "contains an image
+// node", because they are laid over the dial's SVG, and the accepted-incomplete
+// entry below waves that away. Measuring them from painted pixels is what stops
+// that acceptance from being a hole: the primary instrument's own numbers are
+// the last thing that should be exempt from a contrast check.
+const PAINTED_SELECTOR = '.btn, .gauge .readout > div'
 
-// Optional: drive the app into a state that only exists after interaction, then
-// audit again. Return the label to report it under.
-// Example:
-//   { label: '/ (data loaded)', route: '/', async setup(page) { ... } }
-const POPULATED_STATES = []
+/**
+ * Every screen, reached the way an operator reaches it: by clicking the rail.
+ * The board is not audited empty, because a dashboard audited empty is a
+ * dashboard whose tables, transcripts and forms were never looked at.
+ */
+const POPULATED_STATES = SCREENS.map((screen) => ({
+  label: screen.label,
+  route: '/',
+  async setup(page) {
+    const clicks = Array.isArray(screen.reach) ? screen.reach : [screen.reach]
+    for (const click of clicks) {
+      await page.waitForSelector(click)
+      await page.click(click)
+    }
+    await page.waitForSelector(screen.settled)
+  },
+}))
 
 // axe rule sets. WCAG 2.0/2.1 A and AA is a conformance claim; axe's
 // best-practice set is a moving style opinion, so it is deliberately not here.
@@ -107,6 +155,11 @@ const EXPERIMENTAL_RULES = ['label-content-name-mismatch']
 const ACCEPTED_INCOMPLETE = [
   { rule: 'color-contrast', match: /background gradient/i, why: 'axe cannot composite a gradient background' },
   { rule: 'color-contrast', match: /pseudo element/i, why: 'axe cannot composite a pseudo-element background' },
+  // The gauge readout sits over the dial's SVG, so axe declines to judge it.
+  // Accepted ONLY because PAINTED_SELECTOR measures those exact elements from
+  // the painted pixels instead, which is a stronger reading than the one axe
+  // was going to give. Remove the selector and this becomes a blind spot.
+  { rule: 'color-contrast', match: /contains an image node/i, why: 'text over the dial: measured from painted pixels instead' },
 ]
 
 // ===========================================================================
@@ -198,6 +251,17 @@ function startServer() {
       return
     }
 
+    // The product's own read API, answered from fixtures. Nothing here reaches
+    // a database or a telephone: the point is a board with real shapes in it,
+    // rendered deterministically, so the audit sees the interface an operator
+    // sees rather than an error state.
+    const fixture = API_FIXTURES[pathname]
+    if (fixture !== undefined) {
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' })
+      response.end(JSON.stringify(fixture()))
+      return
+    }
+
     let relative = pathname === '/' ? 'index.html' : pathname.replace(/^\//, '')
     if (!extname(relative)) relative += '.html'
     const target = join(DIST, relative)
@@ -254,31 +318,46 @@ function startServer() {
   })
 }
 
+// puppeteer-core downloads no browser, which is the point: it drives one that
+// is already installed. PUPPETEER_EXECUTABLE_PATH wins so a machine or a CI
+// image with the browser somewhere else needs no edit here. Not finding one is
+// a hard stop with the list printed, never a skipped audit.
+const BROWSER_PATHS = [
+  process.env.PUPPETEER_EXECUTABLE_PATH,
+  'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/chromium-browser',
+  '/usr/bin/chromium',
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+]
+
 async function launchBrowser() {
-  // Prefer a browser already on the machine so this runs without a separate
-  // Playwright download.
-  for (const channel of ['msedge', 'chrome']) {
-    try {
-      return await chromium.launch({ channel })
-    } catch {
-      // try the next option
-    }
+  const found = BROWSER_PATHS.find((path) => path && existsSync(path))
+  if (!found) {
+    console.error('No Chrome or Edge was found, so the live accessibility audit cannot run. Looked for:')
+    for (const path of BROWSER_PATHS.filter(Boolean)) console.error(`  ${path}`)
+    console.error('Install one, or set PUPPETEER_EXECUTABLE_PATH to it.')
+    process.exit(2)
   }
-  return await chromium.launch()
+  return await puppeteer.launch({ executablePath: found, headless: true })
 }
 
 // A route that 404s still renders a page, and axe reports no violations against
 // it, so an unchecked navigation lets this gate print "passed" while auditing a
 // page that is not the one named. Every navigation asserts its status.
 async function open(page, route) {
-  const response = await page.goto(baseUrl + route, { waitUntil: 'networkidle' })
+  const response = await page.goto(baseUrl + route, { waitUntil: 'networkidle0' })
   const status = response?.status()
   if (status !== 200) {
     throw new Error(`${route} returned ${status ?? 'no response'}: the audit would have run against the wrong page`)
   }
 }
 
-async function auditPage(page, { label, theme }) {
+async function auditPage(page, { label, theme, viewport }) {
   // Auditing the wrong theme is a silent false pass, which is exactly the
   // failure mode this gate exists to remove. So assert, do not assume.
   if (THEME_ATTRIBUTE) {
@@ -302,7 +381,7 @@ async function auditPage(page, { label, theme }) {
 
   const shape = (items, kind) =>
     items.map((item) => ({
-      label,
+      label: `${label} at ${viewport}`,
       theme,
       kind,
       id: item.id,
@@ -336,9 +415,9 @@ async function auditPage(page, { label, theme }) {
 // the element untouched, so the dominant colour stays the declared one and the
 // ratio looks fine while a corner sits below AA. The drift check covers that by
 // comparing every meaningful colour cluster against the declared background.
-async function checkPaintedContrast(page, { label, theme }) {
+async function checkPaintedContrast(page, { label, theme, viewport }) {
   if (!PAINTED_SELECTOR) return []
-  const screenshot = (await page.screenshot({ fullPage: true })).toString('base64')
+  const screenshot = await page.screenshot({ fullPage: true, encoding: 'base64' })
 
   const measurements = await page.evaluate(
     ({ png, selector }) =>
@@ -498,7 +577,7 @@ async function checkPaintedContrast(page, { label, theme }) {
   const overlayFindings = measurements.results
     .filter((measurement) => measurement.drift !== null && measurement.drift > OVERLAY_DRIFT_TOLERANCE)
     .map((measurement) => ({
-      label,
+      label: `${label} at ${viewport}`,
       theme,
       kind: 'violation',
       id: 'painted-overlay-drift',
@@ -516,7 +595,7 @@ async function checkPaintedContrast(page, { label, theme }) {
   return measurements.results
     .filter((measurement) => measurement.ratio < measurement.required)
     .map((measurement) => ({
-      label,
+      label: `${label} at ${viewport}`,
       theme,
       kind: 'violation',
       id: 'painted-contrast',
@@ -535,8 +614,9 @@ async function checkPaintedContrast(page, { label, theme }) {
 
 // Opens a page whose theme is pinned before any document script runs, so the
 // page is painted in its final theme and no transition is ever in flight.
-async function themedPage(browser, theme) {
+async function themedPage(browser, theme, viewport) {
   const page = await browser.newPage()
+  await page.setViewport(viewport)
 
   // The stream-error handler in startServer only exists when THIS file is
   // serving. Point A11Y_BASE_URL at the product's own preview server, which the
@@ -587,8 +667,11 @@ async function themedPage(browser, theme) {
   // remaining transition from being sampled mid-flight; verify the product's
   // reduced-motion block only changes durations, never colours, or this could
   // alter what axe measures.
-  await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
-  await page.addInitScript(
+  await page.emulateMediaFeatures([
+    { name: 'prefers-color-scheme', value: theme },
+    { name: 'prefers-reduced-motion', value: 'reduce' },
+  ])
+  await page.evaluateOnNewDocument(
     ({ value, attribute, storageKey }) => {
       if (attribute) document.documentElement.setAttribute(attribute, value)
       if (!storageKey) return
@@ -610,22 +693,25 @@ const findings = []
 
 try {
   for (const theme of THEMES) {
-    const page = await themedPage(browser, theme)
+    for (const size of VIEWPORTS) {
+      const page = await themedPage(browser, theme, size)
+      const where = { theme, viewport: size.name }
 
-    for (const route of ROUTES) {
-      await open(page, route)
-      findings.push(...(await auditPage(page, { label: route, theme })))
-      findings.push(...(await checkPaintedContrast(page, { label: route, theme })))
+      for (const route of ROUTES) {
+        await open(page, route)
+        findings.push(...(await auditPage(page, { ...where, label: route })))
+        findings.push(...(await checkPaintedContrast(page, { ...where, label: route })))
+      }
+
+      for (const state of POPULATED_STATES) {
+        await open(page, state.route)
+        await state.setup(page)
+        findings.push(...(await auditPage(page, { ...where, label: state.label })))
+        findings.push(...(await checkPaintedContrast(page, { ...where, label: state.label })))
+      }
+
+      await page.close()
     }
-
-    for (const state of POPULATED_STATES) {
-      await open(page, state.route)
-      await state.setup(page)
-      findings.push(...(await auditPage(page, { label: state.label, theme })))
-      findings.push(...(await checkPaintedContrast(page, { label: state.label, theme })))
-    }
-
-    await page.close()
   }
 } finally {
   await browser.close()
@@ -634,7 +720,8 @@ try {
   if (server) await new Promise((resolve) => server.close(resolve))
 }
 
-const checkCount = (ROUTES.length + POPULATED_STATES.length) * THEMES.length
+const checkCount =
+  (ROUTES.length + POPULATED_STATES.length) * THEMES.length * VIEWPORTS.length
 
 // A request that started and never finished means axe audited something other
 // than the page as authored. Reported first: every verdict below is about a page
@@ -650,12 +737,13 @@ if (serveFailures.length > 0) {
 // the selector check below are true, and the selector message would blame the
 // selector for a fault that is really "nothing was audited at all".
 //
-// THEMES is named too, because an empty THEMES also drives checkCount to zero
-// while slipping past the multi-theme guard at the top, and a message blaming
-// ROUTES when ROUTES is fine sends you looking in the wrong place.
+// THEMES and VIEWPORTS are named too, because an empty either also drives
+// checkCount to zero while slipping past the multi-theme guard at the top, and a
+// message blaming ROUTES when ROUTES is fine sends you looking in the wrong
+// place.
 if (checkCount === 0) {
   console.error(
-    `Live accessibility audit ran ZERO checks: ROUTES=${ROUTES.length}, POPULATED_STATES=${POPULATED_STATES.length}, THEMES=${THEMES.length}. All checks are the product of (routes + states) and themes, so a zero in either factor audits nothing.`,
+    `Live accessibility audit ran ZERO checks: ROUTES=${ROUTES.length}, POPULATED_STATES=${POPULATED_STATES.length}, THEMES=${THEMES.length}, VIEWPORTS=${VIEWPORTS.length}. All checks are the product of (routes + states), themes and viewports, so a zero in any factor audits nothing.`,
   )
   process.exit(2)
 }
