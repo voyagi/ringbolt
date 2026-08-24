@@ -32,6 +32,7 @@
     "fault": "vitest run --config vitest.fault.config.ts",
     "a11y:live": "node scripts/vendor/a11y-live.mjs",
     "a11y:prove": "node scripts/vendor/a11y-prove.mjs",
+    "restore:rehearse": "node scripts/restore-rehearsal.mjs",
     "db:migrate:local": "wrangler d1 migrations apply ringbolt --local",
     "db:migrate:remote": "wrangler d1 migrations apply ringbolt --remote"
   },
