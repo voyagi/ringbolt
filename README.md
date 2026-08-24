@@ -193,6 +193,50 @@ curl http://localhost:8787/api/incidents
 curl http://localhost:8787/api/services/checkout/state
 ```
 
+Or watch it happen at <http://localhost:8787>, which is the point of the next section.
+
+## The deck
+
+The dashboard is one screen with a primary instrument: a ring counting the seconds somebody has
+been on the telephone, with everything that decides whether this is bad arranged around it. The
+centre column is the call, and the sentence that granted permission is joined by a red rule to the
+action it allowed, so the two cannot be read as separate events. The right column is everything not
+on the phone, and the rota, so "who gets called next" is always answered on screen.
+
+Four more screens: the history of every incident, one incident in full with its transcript and the
+system state either side of every action, the runbook and the per-service policy, and the rota.
+
+Three things about it are worth stating because they are decisions rather than defaults.
+
+**Nothing on it is drawn from data Ringbolt does not have.** It consumes alerts and transcripts; it
+is not a monitoring tool. So there is no audio waveform and no error-rate chart, because it has
+neither. What it draws instead are the two series it genuinely holds: the talk track, every
+transcript turn at its own offset coloured by who was speaking, and the arrival trace, alerts
+landing for that service in five minute buckets. The mark saying which sentence authorized an action
+appears only on a turn whose words really contain the phrase that action required, matched the same
+way the authorization gate matches it. When nothing in the transcript proves it, nothing is marked.
+
+**It polls rather than holding a socket.** The board aggregates across every incident and each
+incident is owned by its own Durable Object, so a socket would mean new state on the path that
+decides whether a telephone rings, added for a screen. It reads every two seconds and counts the
+ring against the server's clock rather than the browser's, because a laptop several minutes out is
+ordinary and a call that reads as having run for minus four minutes reads as a bug in Ringbolt.
+
+**It is behind the administrator token**, because it carries transcripts and because its
+configuration screens decide which telephone rings. In development with no token set it is open,
+which is a laptop talking to itself; everywhere else it asks for `ADMIN_TOKEN` and says so plainly
+rather than showing a spinner.
+
+Accessibility is measured rather than asserted. `npm run a11y:live` builds the bundle, drives a real
+browser over every screen in both themes at two widths, runs axe against WCAG 2.1 AA, treats an
+undetermined result as a failure, and measures contrast from the pixels the browser actually painted
+on every control and on the dial's own readout. It is a step in `npm run verify:ship`. Its first run
+found thirty violations, and `npm run a11y:prove` puts five of them back one at a time and expects
+the gate to name each one.
+
+Screenshots of every screen in both themes are in `design/mockups/`, regenerated from the built
+bundle by `node scripts/render-screens.mjs`.
+
 To place real calls, set `CALLE_MODE=live` with a `CALLE_API_KEY`, a `DEMO_PHONE` in E.164, and the
 `CALLE_LOCALE` and `CALLE_REGION` the call will be held in, for example `en-GB` and `NL`.
 Configuration is refused if any of them is missing, so `/health` tells you before an alert does.
@@ -299,6 +343,14 @@ Two of those planted faults changed nothing, which was worth more than the ones 
 guards were being covered by a different rule rather than by a test of their own, and both now have
 one.
 
+The dashboard added seven more, all of which reddened the right test: the board route leaving the
+administrator guard, a set token no longer meaning a token is wanted, the deck focusing the least
+severe thing on the phone instead of the worst, the arrival trace dropping its empty buckets so a
+quiet hour looks like a busy one, an unattributed transcript turn passed through as the responder,
+the deadline track running past full on an overrun, and the client-safe contract module growing an
+import, which is the one thing that would let server code into the browser bundle past a boundary
+rule that would still report clean.
+
 ## Layout
 
 | Path          | What is in it                                                                              |
@@ -307,7 +359,9 @@ one.
 | `src/calle`   | The telephone port, the CALL-E adapter, the local stand-in, and the verification step.     |
 | `src/actions` | What an action definition may say, and the two engines that carry one out.                 |
 | `src/db`      | The D1 schema access layer.                                                                |
-| `src/worker`  | Routing, configuration, and the incident Durable Object.                                   |
+| `src/worker`  | Routing, configuration, the incident Durable Object, and the deck's one read.              |
+| `src/ui`      | The dashboard. It may import `src/domain/view.ts` and nothing else under `src`.            |
+| `design`      | The art direction, and a screenshot of every screen in both themes.                        |
 | `docs/adr`    | Why the stack is what it is.                                                               |
 | `docs`        | Deploying it, the runbook for when it breaks, and the two open questions it has.           |
 
@@ -330,9 +384,12 @@ settle.
 
 Not built yet, and not pretended to be:
 
-- The dashboard. The API is there; the screens are not.
-- Authentication and per-tenant isolation. `/api/config` is guarded by one shared admin token, and
-  the read API is open. Both are stated here rather than left for somebody to discover.
+- The public demo mode and the deliberately breakable demo service, so the loop can be shown to a
+  stranger without a way to trigger a real telephone call.
+- Authentication and per-tenant isolation. Everything the dashboard reads and writes is behind one
+  shared administrator token, `/api/incidents` is open, and there is no retention window that
+  deletes a transcript on a schedule. All three are stated here rather than left for somebody to
+  discover.
 
 ## Licence
 

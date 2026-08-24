@@ -43,11 +43,22 @@ theme rather than an afterthought.
 | edge               | `#23314a` | `#d5dde9` | Every dividing line, and the grid gaps             |
 | on-deck / on-panel | `#e8eef8` | `#101828` | Text, named per surface                            |
 | dim                | `#8695ad` | `#5d6b82` | Labels and secondary text                          |
-| live               | `#ff3d71` | `#e5003f` | The call, and the words that authorized an action  |
-| cyan               | `#22d3ee` | `#0a7ea4` | Ringbolt's own voice, and machine-written evidence |
+| live               | `#ff3d71` | `#c8003a` | The call, and the words that authorized an action  |
+| cyan               | `#22d3ee` | `#0b6c8c` | Ringbolt's own voice, and machine-written evidence |
 | green              | `#29e08a` | `#067a4a` | A completed action, a healthy service              |
-| amber              | `#ffb020` | `#a86400` | Waiting, no answer, escalating                     |
+| amber              | `#ffb020` | `#8f5600` | Waiting, no answer, escalating                     |
 | violet             | `#a78bfa` | `#6d3fd4` | Queued, about to call                              |
+| on-live            | `#0d1420` | `#ffffff` | Ink on a control filled with the live colour       |
+
+**Three day values were darkened on 2026-08-24, and one token was added.** The day live, cyan and
+amber first locked here measured 4.36, 4.25 and 4.28 to one against the day deck. All three carry
+words rather than only rules, and AA asks 4.5 of body text, so all three were failing. `on-live`
+exists for the same reason at the other end: white on the night red measures 3.41, while the deck
+ground on it measures 5.48, and the day red is dark enough that the opposite holds. That is why the
+ink on a live-filled control is a token and not a colour written into the button.
+
+Nothing here was noticed by eye. `npm run a11y:live` measures every screen in both themes at two
+widths against the pixels the browser actually paints, and it reported all of it.
 
 Five semantic colours, not one accent on black. That distinction matters: a single acid accent on
 near-black is the default every tool ships. Here each hue means one specific state and is never
@@ -70,7 +81,7 @@ that decide whether this is bad: severity, what is affected, the error rate agai
 and a sparkline of the last twenty-five minutes. The ring is the only large circular element
 anywhere in the product, so it can never be confused with anything else.
 
-**Centre, the call.** A waveform where Ringbolt's voice, the human's voice, and the moment of
+**Centre, the call.** A talk track where Ringbolt's voice, the human's voice, and the moment of
 authorization are three distinct colours. Then the conversation. Then the action docket. Then a
 plain timeline of what Ringbolt actually did and when.
 
@@ -103,12 +114,33 @@ Motion reads like an instrument responding, never like software being cute.
 
 ## Real media
 
-The load-bearing visuals are all **measured data rendered honestly**: the call's real waveform with
-real speaker attribution, the real error-rate sparkline, the real timeline with real timestamps.
+The load-bearing visuals are all **measured data rendered honestly**: the talk track with real
+speaker attribution at real offsets, the arrival trace, the timeline with real timestamps, the ring
+counting against a real deadline.
 
 That is a deliberate position rather than a shortage of ideas. This product's credibility is that
 it tells you exactly what happened and what it did about it, so decorative imagery would work
 against it. Nothing here is a placeholder graphic standing in for something that was never built.
+
+**Two of them changed when they were built, and both changes were the same correction.** The first
+draft of this section named a waveform of the call's audio and a sparkline of the service's error
+rate against its baseline. Ringbolt holds neither. It receives an alert payload and a transcript; it
+is not a monitoring tool and it never sees an audio envelope. Drawing either would have been
+decoration dressed as evidence, on the one product that must never do that. What replaced them are
+the two real series this product does hold:
+
+- **The talk track.** Every transcript turn drawn at its own `offset_seconds`, each one running until
+  the next begins. It shows who talked, for how long, and where in the call the authorization landed,
+  which is more useful than an audio envelope would have been.
+- **The arrival trace.** Alerts landing for this service in five minute buckets, read from the
+  incident event log. It is the only time series Ringbolt genuinely has, and it shows a storm, which
+  is the thing the left column is for.
+
+The mark that says which sentence granted permission follows the same rule. It is drawn only on a
+turn whose words actually contain the phrase the action required, matched the same way the
+authorization gate matches it. When no turn carries them, nothing is marked: pointing at the last
+thing somebody said and calling it the authorization would be a guess, and this product does not act
+on guesses about what somebody said.
 
 ## How this direction was chosen
 
@@ -129,10 +161,27 @@ before any of them was judged. All three are kept in `design/bakeoff2/`.
 
 Round one's rejected candidates stay in `design/bakeoff/` as a record of what was tried.
 
-Rendered: `mockups/board-day.png` and `mockups/board-night.png`, from `mockups/board.html`.
+`mockups/board.html` and its two renders are kept as the record of what was locked, and they are the
+last hand-drawn thing in this folder.
 
-## Still to draw
+## What is in design/mockups now
 
-The watch board only, in both themes. The incident history view, the runbook and authority
-screens, and the rota have no mockup yet and are the next design work. Nothing in this document
-claims a screen that has not been rendered.
+Every screen, both themes, screenshots of the REAL built bundle rather than drawings of it:
+`deck`, `deck-narrow`, `incidents`, `incident`, `runbooks`, `rota` and `settings`, each with a
+`-night` and a `-day`. `npm run build && node scripts/render-screens.mjs` regenerates them from the
+same fixtures the accessibility gate audits, so the pictures in this folder and the pages the gate
+checks are the same pages.
+
+A hand-drawn mockup was the right artefact while the direction was being chosen and is the wrong one
+afterwards: a picture of a screen that no longer exists is worse than no picture, because somebody
+will trust it.
+
+## What the render caught that the code review did not
+
+Both worth recording, because both are the same class of mistake and neither was visible in the CSS:
+
+- The talk track had a fixed height inside a column flex container, so a long transcript underneath
+  shrank it to nothing. The strip simply was not there, and nothing failed.
+- The incident page paired each call with the action run at the same index. An escalated incident is
+  two calls and one run, so the rollback docket hung under the call nobody answered, over the words
+  "authority: Nadia". It now joins on when the run happened, and a test holds it there.
