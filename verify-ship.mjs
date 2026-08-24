@@ -50,11 +50,19 @@ const timeoutOverride = Number(process.env.VERIFY_SHIP_TIMEOUT_MS);
 const STEP_TIMEOUT_MS =
   Number.isFinite(timeoutOverride) && timeoutOverride > 0 ? timeoutOverride : 30 * 60 * 1000;
 
+// The build sits in the middle rather than at the end, and both steps after it
+// are the reason: `gate` measures the client bundle's size and `a11y` audits the
+// built output in a real browser. Neither can run against source, and a gate
+// that silently has nothing to read is the false clean this whole file exists to
+// remove - so the build is a STEP, with its own exit code, not a thing somebody
+// is expected to have run first.
 const STEPS = [
   { name: 'types', cmd: 'npm run gate:types' }, // tsc --noEmit
   { name: 'tests', cmd: 'npm test' },           // FULL suite, one-shot
   { name: 'lint',  cmd: 'npm run lint' },       // WHOLE-repo lint
+  { name: 'build', cmd: 'npm run build' },      // the client bundle the next two read
   { name: 'gate',  cmd: 'npm run gate' },       // committed gate chain (floors)
+  { name: 'a11y',  cmd: 'npm run a11y:live' },  // axe in a real browser, every screen, both themes
 ];
 
 const results = [];

@@ -33,23 +33,26 @@ jobs:
       # Swap `npm ci` + the `npm run` calls below for the product's package manager (pnpm/bun/yarn)
       # if it does not use npm - this file hardcodes npm.
       - run: npm ci
-      # Build first so the frontend size-limit gate has a bundle to measure. `--if-present` makes this
-      # a no-op on backend/CLI products with no build script (without a build, size-limit errors "no
-      # files found" and the gate fails for the wrong reason).
-      # There is deliberately no build script here yet. Ringbolt serves everything from the Worker
-      # until phase 5 creates the client bundle, and a `vite build` with no entry module exits 1, so
-      # leaving the script in place made this workflow unable to go green on its very first run.
-      - run: npm run build --if-present
+      # The accessibility gate drives a real browser against the built output. ubuntu-latest ships
+      # Google Chrome at this path; a11y-live.mjs finds it there, and prints every path it looked in
+      # and exits 2 if none of them exists, so a runner image that moves it fails loudly rather than
+      # skipping the audit.
+      - run: google-chrome --version
+      # Build first so the size and accessibility gates have a bundle to read. `verify:ship` builds
+      # again as one of its own steps, which is deliberate: this line keeps the client-secret step
+      # below independent of what verify:ship happens to do, and a second vite build costs a second.
+      - run: npm run build
       # Each gate is a FLOOR: green = no known violation, never "good". Taste/craft is NOT gated here
       # (it routes to the decorrelated reviewer). Do not "make the gate pass" by suppressing it.
       # verify:ship rather than gate: there is no separate test workflow, so this is the only place
-      # CI runs the full surface (types, the whole suite, whole-repo lint, then the gate chain).
+      # CI runs the full surface (types, the whole suite, whole-repo lint, build, the gate chain,
+      # then the live accessibility audit).
       - run: npm run verify:ship
-      # The client-secret step belongs here and is deliberately absent until there is something for
-      # it to read. Ringbolt serves its pages from the Worker today and has no client bundle, so the
-      # gate would correctly report UNKNOWN and paint CI red for a bundle that does not exist. Phase
-      # 5 builds the dashboard, and that phase does not count as done until this step is back and
-      # green. The gate and its mutation harness are installed and proven either way.
+      # The dashboard's bundle, scanned for a server-only key. It is pointed at dist/client
+      # explicitly rather than left to auto-detect: this repo builds the Worker and the client from
+      # one tree, and a gate that scanned all of `dist` would be reading server code, which is where
+      # a secret is CORRECT.
+      - run: node scripts/vendor/check-client-secrets.mjs dist/client
       # Client-secret gate, as its OWN step rather than inside `npm run gate`. It needs a BUILT
       # bundle, and `gate` also runs in the pre-commit hook where none exists - there it would
       # correctly report UNKNOWN (exit 2) and fail every commit, so it would be deleted within a

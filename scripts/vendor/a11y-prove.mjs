@@ -56,18 +56,76 @@ import { join } from 'node:path'
 
 const BUILD_CMD = 'npm run build'
 const GATE_CMD = 'node scripts/vendor/a11y-live.mjs'
-const DIST = join(process.cwd(), 'dist')
+const DIST = join(process.cwd(), 'dist', 'client')
+const CSS = join(DIST, 'assets', 'index.css')
+const JS = join(DIST, 'assets', 'index.js')
 
 // One entry per defect class the gate claims to catch. `from` must be an exact
 // substring of the built file; `expectRule` must be the id the gate prints.
+//
+// EVERY CASE BELOW IS A DEFECT THIS PRODUCT ACTUALLY HAD. The first live run of
+// the gate, on 2026-08-24, reported 30 violations and 14 undetermined results
+// across the dashboard as first written. These five are one per class it found,
+// each restored into the built output by putting the broken value back. Nothing
+// here is a plausible-sounding defect somebody invented to give the harness
+// something to catch.
+//
+// The anchors are minified output rather than source, which is the point: this
+// proves the gate on the bytes that ship. They move when the build output moves,
+// and a moved anchor is reported as SKIPPED and fails the run, never as a pass.
 const CASES = [
-  // {
-  //   name: 'dark theme primary button drops below the AA contrast floor',
-  //   file: join(DIST, 'assets', 'app.css'),
-  //   from: "[data-theme='dark'] .button.primary {\n  color: var(--paper);\n}",
-  //   to: "[data-theme='dark'] .button.primary {\n  color: oklch(98% 0.014 84);\n}",
-  //   expectRule: 'painted-contrast',
-  // },
+  {
+    // The primary button was white on the night red: 3.41 to one against a
+    // floor of 4.5. Fixed by giving the ink its own token per theme.
+    name: 'the night theme primary button goes back to white ink on red',
+    file: CSS,
+    from: '--on-live:#0d1420}',
+    to: '--on-live:#fff}',
+    expectRule: 'painted-contrast',
+  },
+  {
+    // At one column the deck used to keep its pinned height and scroll the
+    // cluster, so each section's content spilled outside its own painted
+    // background and eleven elements ended up reading on the dividing colour
+    // instead of on the deck. The whole media block goes back, because the
+    // defect was the combination rather than any one declaration in it.
+    name: 'the one-column deck spills its content off its own background again',
+    file: CSS,
+    from: '@media (width<=78rem){.shell.pinned{height:auto;overflow:visible}.cluster{grid-template-columns:1fr}.cluster>section{min-height:auto;overflow:visible}}',
+    to: '@media (width<=78rem){.cluster{grid-template-columns:1fr;overflow:auto}.cluster>section{overflow:visible}}',
+    expectRule: 'color-contrast',
+  },
+  {
+    // The intake example carried an aria-label on a bare pre, which has no role
+    // to hang it on. axe reports this only as UNDETERMINED, never as a
+    // violation, so this case also proves undetermined results still fail.
+    name: 'the intake example loses the role its aria-label needs',
+    file: JS,
+    from: 'role:`region`,tabIndex:0,"aria-label":`An example intake request`',
+    to: 'tabIndex:0,"aria-label":`An example intake request`',
+    expectRule: 'aria-prohibited-attr',
+  },
+  {
+    // The sharpest case. The gauge readout lies over the dial's SVG, so axe
+    // gives up on it and the accepted-incomplete list waves it through. Only
+    // the painted-pixel measurement can catch a contrast failure there, and if
+    // PAINTED_SELECTOR ever stops covering the readout, this case goes red.
+    name: 'the dial readout is coloured into the deck, where axe cannot judge it',
+    file: CSS,
+    from: '.gauge .readout .under{font-size:var(--step-small);color:var(--dim)}',
+    to: '.gauge .readout .under{font-size:var(--step-small);color:#0f1826}',
+    expectRule: 'painted-contrast',
+  },
+  {
+    // A decorative overlay over a control. Nothing in the CSS changes what the
+    // button DECLARES, so every computed-style reading stays comfortable while
+    // the painted pixels drift. Only a screenshot finds this.
+    name: 'a decorative overlay is painted across every control',
+    file: CSS,
+    from: '.btn:hover:not(:disabled){border-color:var(--dim)}',
+    to: '.btn{position:relative}.btn:after{content:"";position:absolute;inset:0;background:#ffffff40}.btn:hover:not(:disabled){border-color:var(--dim)}',
+    expectRule: 'painted-overlay-drift',
+  },
 ]
 
 // ===========================================================================
