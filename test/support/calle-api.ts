@@ -70,6 +70,15 @@ export type CalleApiStub = {
   /** Replace a stored call, for reading back an outcome the adapter has to map. */
   settle(callId: string, patch: Partial<ApiCall>): void;
   ids(): string[];
+  /**
+   * Accept the next n creates in full and then fail to answer them.
+   *
+   * This is what a timeout looks like from the client's side, and CALL-E confirmed on 2026-08-24
+   * that it is what actually happened on 2026-08-22: the call was accepted and the answer never
+   * arrived. The call is stored before the failure precisely because that is the trap. A client
+   * that treats it as "no call was made" and sends again with a fresh key gets billed twice.
+   */
+  dropAnswers(count: number): void;
 };
 
 export function calleApiStub(): CalleApiStub {
@@ -77,6 +86,7 @@ export function calleApiStub(): CalleApiStub {
   const idByKey = new Map<string, string>();
   const creates: RecordedCreate[] = [];
   let placed = 0;
+  let answersToDrop = 0;
 
   async function create(request: Request): Promise<Response> {
     const body = (await request.json()) as Record<string, unknown>;
@@ -89,16 +99,21 @@ export function calleApiStub(): CalleApiStub {
 
     // The real API answers a repeated key with the call it already made rather than dialling
     // again, which is the property that stops a retry becoming a second telephone ringing.
-    const existing =
+    const knownId =
       idempotencyKey === null ? undefined : idByKey.get(idempotencyKey);
-    if (existing !== undefined) {
-      return json(201, calls.get(existing));
+    let call = knownId === undefined ? undefined : calls.get(knownId);
+    if (call === undefined) {
+      placed += 1;
+      call = queuedCall(`call_stub_${placed}`, body);
+      calls.set(call.id, call);
+      if (idempotencyKey !== null) idByKey.set(idempotencyKey, call.id);
     }
 
-    placed += 1;
-    const call = queuedCall(`call_stub_${placed}`, body);
-    calls.set(call.id, call);
-    if (idempotencyKey !== null) idByKey.set(idempotencyKey, call.id);
+    // The failure is raised after the call exists, which is the whole point of it.
+    if (answersToDrop > 0) {
+      answersToDrop -= 1;
+      throw new Error("The operation was aborted due to timeout");
+    }
 
     return json(201, call);
   }
@@ -114,6 +129,9 @@ export function calleApiStub(): CalleApiStub {
   return {
     creates,
     ids: () => [...calls.keys()],
+    dropAnswers(count) {
+      answersToDrop = count;
+    },
     settle(callId, patch) {
       const call = calls.get(callId);
       if (call === undefined) throw new Error(`no stub call ${callId}`);

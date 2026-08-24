@@ -692,6 +692,17 @@ export class Repo {
     return row?.n ?? 0;
   }
 
+  /** How many real calls were placed since a moment, which is what bounds a burst of them. */
+  async countRealCallsSince(placedAfter: string): Promise<number> {
+    const row = await this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM call_ledger WHERE placer = 'live' AND placed_at >= ?1`,
+      )
+      .bind(placedAfter)
+      .first<{ n: number }>();
+    return row?.n ?? 0;
+  }
+
   async getServicePolicy(service: string): Promise<ServicePolicy | null> {
     const row = await this.db
       .prepare(`SELECT * FROM service_policy WHERE service = ?1`)

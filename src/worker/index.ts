@@ -4,7 +4,7 @@ import {
   eventIdFromDelivery,
   verifyCall,
 } from "../calle/verify.js";
-import { REAL_CALL_ALLOWANCE, isTerminalCall } from "../calle/port.js";
+import { CALL_PRICE_USD, isTerminalCall, usd } from "../calle/port.js";
 import {
   type ActionDefinition,
   type ActionDefinitionInput,
@@ -443,13 +443,24 @@ app.get("/api/audit/incidents/:id", async (c) => {
   });
 });
 
+/**
+ * What has been spent on real calls, in the unit the provider actually bills in. It reported a
+ * count against a hardcoded allowance of twenty until 2026-08-24, which was a figure nobody had
+ * chosen measuring a thing nobody is charged for.
+ */
 app.get("/api/budget", async (c) => {
-  const repo = new Repo(c.env.DB);
-  const spent = await repo.countRealCalls();
+  const config = readConfig(c.env);
+  const placed = await new Repo(c.env.DB).countRealCalls();
+  const spentUsd = usd(placed * CALL_PRICE_USD);
+  const remainingUsd = usd(Math.max(0, config.CALLE_CREDIT_USD - spentUsd));
+
   return c.json({
-    realCallsPlaced: spent,
-    freeTierTotal: REAL_CALL_ALLOWANCE,
-    remaining: Math.max(0, REAL_CALL_ALLOWANCE - spent),
+    realCallsPlaced: placed,
+    callPriceUsd: CALL_PRICE_USD,
+    spentUsd,
+    creditUsd: config.CALLE_CREDIT_USD,
+    remainingUsd,
+    callsRemaining: Math.floor(remainingUsd / CALL_PRICE_USD),
   });
 });
 

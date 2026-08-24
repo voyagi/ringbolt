@@ -1,7 +1,13 @@
 import type { ActionContext } from "../actions/context.js";
 import { spokenLines } from "../actions/definition.js";
 import { type RunbookAction, actionsAllowedBy } from "../actions/registry.js";
-import { type CallPlacer, isTerminalCall } from "../calle/port.js";
+import {
+  type CallPlacer,
+  CallNotAttemptedError,
+  type CallSnapshot,
+  type PlaceCallInput,
+  isTerminalCall,
+} from "../calle/port.js";
 import { type VerifiedCall, verifyCall } from "../calle/verify.js";
 import { type Repo, isDuplicateOpenIncident } from "../db/repo.js";
 import {
@@ -608,21 +614,20 @@ export class Orchestrator {
     attempt: number,
     deadline: Date,
   ): Promise<CallOutcome> {
+    const request: PlaceCallInput = {
+      phone: contact.phone,
+      task: buildTask(incident, offered, this.deps.now()),
+      resultSchema: decisionResultSchema as unknown as Record<string, unknown>,
+      metadata: { incident_id: incident.id, service: incident.service },
+      webhookUrl: `${this.deps.publicBaseUrl}/webhooks/calle`,
+      // One key per attempt, and the same key on every send of that attempt. The next person in the
+      // rotation is a different attempt, so their call is not folded into the last one.
+      idempotencyKey: `${incident.id}:attempt-${attempt}`,
+    };
+
     let call;
     try {
-      call = await this.deps.placer.place({
-        phone: contact.phone,
-        task: buildTask(incident, offered, this.deps.now()),
-        resultSchema: decisionResultSchema as unknown as Record<
-          string,
-          unknown
-        >,
-        metadata: { incident_id: incident.id, service: incident.service },
-        webhookUrl: `${this.deps.publicBaseUrl}/webhooks/calle`,
-        // One call per attempt. A retried place cannot become a second ringing phone, and the next
-        // person in the rotation is a different attempt, so their call is not folded into the last.
-        idempotencyKey: `${incident.id}:attempt-${attempt}`,
-      });
+      call = await this.placeAndRecover(request);
     } catch (error) {
       const failed = await this.callCouldNotBePlaced(incident, error);
       return {
@@ -659,37 +664,69 @@ export class Orchestrator {
   }
 
   /**
+   * Sends the request, and sends the IDENTICAL request once more if the first one failed in a way
+   * that could still have created a call.
+   *
+   * A create that times out is not a create that did not happen. CALL-E confirmed on 2026-08-24
+   * that a response which never reaches the client does not cancel a call it already accepted, and
+   * that a repeat carrying a DIFFERENT idempotency key is billed as a second, independent call.
+   * That is what emptied the balance on 2026-08-22: a timeout, then a fresh key.
+   *
+   * So the second send carries the same key, which by contract returns the call the first one made
+   * rather than making another. It is the only way to learn the id of a call we would otherwise
+   * have paid for, never seen, and left ringing somebody's telephone with nothing watching it. A
+   * refusal raised before anything went onto the wire is rethrown untouched: there is nothing to
+   * recover, and sending it again would only be a second refusal.
+   */
+  private async placeAndRecover(
+    request: PlaceCallInput,
+  ): Promise<CallSnapshot> {
+    try {
+      return await this.deps.placer.place(request);
+    } catch (error) {
+      if (error instanceof CallNotAttemptedError) throw error;
+      return this.deps.placer.place(request);
+    }
+  }
+
+  /**
    * A telephone that will not dial has to close the incident rather than leave it. Every open state
    * counts as open, so an incident abandoned here would answer every later repeat of the same alert
    * as a duplicate of itself and no call would ever be placed for that service again.
+   *
+   * Whether a call exists is recorded rather than assumed. Nothing reached CALL-E when the refusal
+   * came from our own guards; anything else got as far as the wire and the second send could not
+   * settle it either, so a call may be ringing that this incident will never hear about, and a
+   * person needs to know that rather than read "failed" and move on.
    */
   private async callCouldNotBePlaced(
     incident: Incident,
     error: unknown,
   ): Promise<OpenResult> {
-    const detail =
+    const sent = !(error instanceof CallNotAttemptedError);
+    const reported =
       error instanceof Error ? error.message : "the call could not be placed";
+    const detail = sent
+      ? `${reported}. It was sent twice with the same idempotency key and neither answered, so a call may exist that Ringbolt cannot see. Check the CALL-E dashboard before trying again.`
+      : reported;
     const at = this.deps.now().toISOString();
     const state = transition(incident.state, "failed");
+    const outcome = sent ? "call_outcome_unknown" : "call_place_refused";
 
     await this.deps.repo.updateIncident(
       incident.id,
-      {
-        state,
-        outcome: "call_place_failed",
-        wakeAt: null,
-        wakeReason: null,
-      },
+      { state, outcome, wakeAt: null, wakeReason: null },
       at,
     );
     await this.deps.wake.clear(incident.id);
     await this.record(incident.id, "call.place_failed", detail, {
       placer: this.deps.placer.kind,
+      reachedTheProvider: sent,
     });
 
     return {
       kind: "call_failed",
-      incident: { ...incident, state, updatedAt: at },
+      incident: { ...incident, state, outcome, updatedAt: at },
       detail,
     };
   }

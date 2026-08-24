@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   CallBudgetExhaustedError,
+  CallBurstError,
   LiveCallPlacer,
   NumberNotAllowedError,
 } from "../src/calle/live.js";
-import { REAL_CALL_ALLOWANCE } from "../src/calle/port.js";
+import {
+  CALL_PRICE_USD,
+  MAX_CALLS_PER_BURST_WINDOW,
+} from "../src/calle/port.js";
 import { verifyCall } from "../src/calle/verify.js";
 import { decisionResultSchema } from "../src/domain/decision.js";
 import {
@@ -17,16 +21,26 @@ import {
 const API_KEY = "test-key-not-a-real-credential";
 const OWNED_NUMBER = "+31612345678";
 
+/** A dollar, which at five cents a call is twenty of them. */
+const CREDIT_USD = 1;
+const CALLS_IN_THE_CREDIT = CREDIT_USD / CALL_PRICE_USD;
+
+type Budget = { spent?: number; recent?: number; creditUsd?: number };
+
 function placerWith(
   api: CalleApiStub,
-  spent = 0,
+  budget: Budget = {},
   allowedNumbers: string[] = [OWNED_NUMBER],
 ): { placer: LiveCallPlacer; api: CalleApiStub } {
   return {
     api,
     placer: new LiveCallPlacer({
       apiKey: API_KEY,
-      budget: { spent: async () => spent },
+      budget: {
+        creditUsd: budget.creditUsd ?? CREDIT_USD,
+        spent: async () => budget.spent ?? 0,
+        placedSince: async () => budget.recent ?? 0,
+      },
       allowedNumbers,
       baseUrl: "https://calle.invalid",
       fetchImpl: api.fetch,
@@ -237,8 +251,7 @@ describe("what the adapter reads back", () => {
 /**
  * A rotation can name any contact anybody added through the configuration endpoint, so without this
  * list the set of telephones a live build can reach is a database table. What it protects against
- * is a real stranger's phone ringing at three in the morning, paid for out of an allowance of
- * twenty calls that cannot be topped up.
+ * is a real stranger's phone ringing at three in the morning, billed to the owner.
  */
 describe("the numbers this build may call", () => {
   it("refuses a number that is not on the list, and sends nothing", async () => {
@@ -262,7 +275,7 @@ describe("the numbers this build may call", () => {
 
   it("places a call to a second number once that number is on the list", async () => {
     const api = calleApiStub();
-    const { placer } = placerWith(api, 0, [OWNED_NUMBER, "+31698765432"]);
+    const { placer } = placerWith(api, {}, [OWNED_NUMBER, "+31698765432"]);
 
     await expect(
       placer.place({ ...anIncidentCall(), phone: "+31698765432" }),
@@ -270,12 +283,12 @@ describe("the numbers this build may call", () => {
   });
 
   /**
-   * The number is checked before the allowance, so a build with nothing left to spend still says
-   * the more important of the two things when both are wrong.
+   * The number is checked before the credit, so a build with nothing left to spend still says the
+   * more important of the two things when both are wrong.
    */
-  it("refuses on the number before it refuses on the allowance", async () => {
+  it("refuses on the number before it refuses on the credit", async () => {
     const api = calleApiStub();
-    const { placer } = placerWith(api, REAL_CALL_ALLOWANCE);
+    const { placer } = placerWith(api, { spent: CALLS_IN_THE_CREDIT });
 
     await expect(
       placer.place({ ...anIncidentCall(), phone: "+31699999999" }),
@@ -283,10 +296,10 @@ describe("the numbers this build may call", () => {
   });
 });
 
-describe("the real-call allowance", () => {
-  it("refuses to place a call once the allowance is spent, and sends nothing", async () => {
+describe("what this build may spend", () => {
+  it("refuses to place a call once the credit is spent, and sends nothing", async () => {
     const api = calleApiStub();
-    const { placer } = placerWith(api, REAL_CALL_ALLOWANCE);
+    const { placer } = placerWith(api, { spent: CALLS_IN_THE_CREDIT });
 
     await expect(placer.place(anIncidentCall())).rejects.toThrow(
       CallBudgetExhaustedError,
@@ -294,9 +307,9 @@ describe("the real-call allowance", () => {
     expect(api.creates).toHaveLength(0);
   });
 
-  it("places the last one", async () => {
+  it("places the last one the credit covers", async () => {
     const api = calleApiStub();
-    const { placer } = placerWith(api, REAL_CALL_ALLOWANCE - 1);
+    const { placer } = placerWith(api, { spent: CALLS_IN_THE_CREDIT - 1 });
 
     await expect(placer.place(anIncidentCall())).resolves.toMatchObject({
       status: "queued",
@@ -304,17 +317,84 @@ describe("the real-call allowance", () => {
   });
 
   /**
-   * An incident whose call cannot be read is an incident that never resolves, so a spent allowance
+   * The ceiling used to be a count of twenty compiled into the source, which was both the wrong
+   * unit and nobody's decision. A deployment that has not said what it may spend spends nothing.
+   */
+  it("refuses everything when nobody has said what may be spent", async () => {
+    const api = calleApiStub();
+    const { placer } = placerWith(api, { creditUsd: 0 });
+
+    await expect(placer.place(anIncidentCall())).rejects.toThrow(
+      /CALLE_CREDIT_USD/,
+    );
+    expect(api.creates).toHaveLength(0);
+  });
+
+  /**
+   * An incident whose call cannot be read is an incident that never resolves, so a spent balance
    * must not be able to strand the calls it already paid for.
    */
-  it("still reads a call back when the allowance is spent", async () => {
+  it("still reads a call back when the credit is spent", async () => {
     const api = calleApiStub();
-    const { placer } = placerWith(api, 0);
+    const { placer } = placerWith(api);
     const placed = await placer.place(anIncidentCall());
 
-    const { placer: broke } = placerWith(api, REAL_CALL_ALLOWANCE);
+    const { placer: broke } = placerWith(api, { spent: CALLS_IN_THE_CREDIT });
     await expect(broke.get(placed.id)).resolves.toMatchObject({
       id: placed.id,
     });
+  });
+});
+
+/**
+ * The guard that would have stopped 2026-08-22. Twenty-three separate call tasks were created in
+ * half an hour, every one of them a different logical call and so every one of them fine by any
+ * check that looks at a single call. What was wrong was the rate.
+ */
+describe("how fast this build may call", () => {
+  it("refuses once too many have gone out in the window, and sends nothing", async () => {
+    const api = calleApiStub();
+    const { placer } = placerWith(api, {
+      recent: MAX_CALLS_PER_BURST_WINDOW,
+    });
+
+    await expect(placer.place(anIncidentCall())).rejects.toThrow(
+      CallBurstError,
+    );
+    expect(api.creates).toHaveLength(0);
+  });
+
+  it("allows the last one inside the window", async () => {
+    const api = calleApiStub();
+    const { placer } = placerWith(api, {
+      recent: MAX_CALLS_PER_BURST_WINDOW - 1,
+    });
+
+    await expect(placer.place(anIncidentCall())).resolves.toMatchObject({
+      status: "queued",
+    });
+  });
+
+  it("reads the window from the clock rather than from all of history", async () => {
+    const api = calleApiStub();
+    const asked: string[] = [];
+    const placer = new LiveCallPlacer({
+      apiKey: API_KEY,
+      budget: {
+        creditUsd: CREDIT_USD,
+        spent: async () => 0,
+        placedSince: async (iso) => {
+          asked.push(iso);
+          return 0;
+        },
+      },
+      allowedNumbers: [OWNED_NUMBER],
+      baseUrl: "https://calle.invalid",
+      fetchImpl: api.fetch,
+      now: () => new Date("2026-08-22T12:30:00.000Z"),
+    });
+
+    await placer.place(anIncidentCall());
+    expect(asked[0]).toBe("2026-08-22T12:20:00.000Z");
   });
 });

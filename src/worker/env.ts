@@ -30,6 +30,15 @@ const shared = {
    * authentication proper is phase 7, and an unguarded write here is a stranger's phone ringing.
    */
   ADMIN_TOKEN: blankIsAbsent(z.string().min(16).optional()),
+  /**
+   * How much this deployment may spend on real calls, in dollars. CALL-E bills per call task
+   * created, at five cents, and a task that never connects is billed like any other.
+   *
+   * It defaults to nothing on purpose. Before 2026-08-22 the ceiling was a count of twenty
+   * hardcoded in the source, which was both the wrong unit and nobody's decision; now a live build
+   * cannot spend a cent until somebody writes down what they are prepared to lose.
+   */
+  CALLE_CREDIT_USD: z.coerce.number().min(0).max(50).default(0),
   /** How long the local stand-in waits before a call reaches a terminal state. Fake mode only. */
   CALLE_FAKE_DELAY_MS: z.coerce
     .number()
