@@ -309,6 +309,7 @@ one.
 | `src/db`      | The D1 schema access layer.                                                                |
 | `src/worker`  | Routing, configuration, and the incident Durable Object.                                   |
 | `docs/adr`    | Why the stack is what it is.                                                               |
+| `docs`        | Deploying it, the runbook for when it breaks, and the two open questions it has.           |
 
 ## Status
 

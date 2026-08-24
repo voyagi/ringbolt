@@ -140,6 +140,27 @@ npm run verify:ship
 npm run deploy
 ```
 
+## Backups, restore, and rolling back
+
+The half of deploying that only matters on the worst day. `docs/RUNBOOK.md` is the whole of it,
+with the commands, the retention this database actually gets, and the measured time a restore
+takes. Three things are worth knowing before the first deploy rather than after it:
+
+**The database is backed up whether or not you do anything.** D1 Time Travel keeps a continuous
+restore window, 7 days on the free plan and 30 on a paid one, verified on Cloudflare's own
+documentation on 2026-08-24. It covers a bad migration or a wrong delete. It does not cover losing
+the account, which is what `.github/workflows/d1-backup.yml` is for, and that workflow stays off
+until you set `D1_BACKUP_ENABLED` and a token.
+
+**Rehearse the restore before you need it.** `node scripts/restore-rehearsal.mjs` runs the whole
+loss and recovery against the local database and prints how long each step took. On 2026-08-24, with
+2010 rows, the export took 2 seconds and the import took 34.
+
+**A deployed Durable Object migration cannot be rolled back past.** `wrangler rollback` refuses when
+a Durable Object class lifecycle change sits between the two versions, and Ringbolt declares its
+incident object in the first migration. Once that is deployed, forward is the only direction, so a
+change to that class is the one to be slow about.
+
 ## Pointing a monitor at it
 
 Any monitor that can send an HTTP POST works. The body is plain JSON:
