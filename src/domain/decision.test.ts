@@ -131,6 +131,17 @@ describe("authorize", () => {
     }
   });
 
+  /**
+   * A call the provider was completely sure about is the best call this product ever gets, and it
+   * has to be allowed through. The range check reads `score > 1` and one character would turn that
+   * into a refusal of every perfect call, quietly, with nothing else in the suite noticing.
+   */
+  it("allows a confidence of exactly one", () => {
+    expect(authorize({ ...base, confidenceScore: 1 })).toMatchObject({
+      authorized: true,
+    });
+  });
+
   it("refuses just below the floor and allows exactly at it", () => {
     expect(
       authorize({ ...base, confidenceScore: CONFIDENCE_FLOOR - 0.001 }),

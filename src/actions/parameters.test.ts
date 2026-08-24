@@ -111,6 +111,84 @@ describe("reading back what the responder said", () => {
     ).toEqual({ ok: true, values: {} });
   });
 
+  /**
+   * The edges, which is where a value that decides what happens to production goes wrong quietly.
+   * Each of these was a mutant that survived the suite before it was written: the bound could have
+   * been off by one in either direction and every other test would still have passed.
+   */
+  it("accepts a value sitting exactly on each bound", () => {
+    expect(
+      readParameters([release], { release: "x".repeat(20) }),
+    ).toMatchObject({ ok: true });
+    expect(readParameters([instances], { instances: 1 })).toEqual({
+      ok: true,
+      values: { instances: 1 },
+    });
+    expect(readParameters([instances], { instances: 10 })).toEqual({
+      ok: true,
+      values: { instances: 10 },
+    });
+    expect(readParameters([instances], { instances: 0 })).toMatchObject({
+      ok: false,
+    });
+    expect(readParameters([instances], { instances: 11 })).toMatchObject({
+      ok: false,
+    });
+  });
+
+  /** Speech to text pads what it hands back, and the padding is not part of what was said. */
+  it("trims before deciding, on every type that reads words", () => {
+    expect(readParameters([drain], { drain: "  yes  " })).toEqual({
+      ok: true,
+      values: { drain: true },
+    });
+    expect(readParameters([region], { region: "  us-east " })).toEqual({
+      ok: true,
+      values: { region: "us-east" },
+    });
+    expect(readParameters([instances], { instances: " 6 " })).toEqual({
+      ok: true,
+      values: { instances: 6 },
+    });
+    expect(readParameters([release], { release: "   " })).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it("takes every spelling of yes and no it claims to take", () => {
+    for (const spoken of ["true", "yes", "on", "TRUE", "On"]) {
+      expect(readParameters([drain], { drain: spoken })).toEqual({
+        ok: true,
+        values: { drain: true },
+      });
+    }
+    for (const spoken of ["false", "no", "off", "OFF"]) {
+      expect(readParameters([drain], { drain: spoken })).toEqual({
+        ok: true,
+        values: { drain: false },
+      });
+    }
+    expect(readParameters([drain], { drain: true })).toEqual({
+      ok: true,
+      values: { drain: true },
+    });
+  });
+
+  /**
+   * The structured result is somebody else's JSON, so a value can arrive as any type at all. A
+   * parameter declared as text takes text; a number where text was declared is a refusal rather
+   * than something quietly stringified into a production request.
+   */
+  it("refuses a value that is not even the right kind of thing", () => {
+    expect(readParameters([release], { release: 12 })).toMatchObject({
+      ok: false,
+    });
+    expect(readParameters([region], { region: 12 })).toMatchObject({
+      ok: false,
+    });
+    expect(readParameters([drain], { drain: 12 })).toMatchObject({ ok: false });
+  });
+
   it("treats nothing at all as nothing given", () => {
     expect(readParameters([], undefined)).toEqual({ ok: true, values: {} });
     expect(readParameters([], ["not", "an", "object"])).toMatchObject({
