@@ -33,8 +33,9 @@ README rather than left to be discovered.
 
 Two legs, because they fail differently.
 
-**On-platform: D1 Time Travel.** Cloudflare keeps a continuous restore window with no action from
-you: 7 days on the free plan, 30 days on a paid plan. Verified on
+The one on the platform is D1's own Time Travel, and it is running whether or not anybody set it
+up. Cloudflare keeps a continuous restore window of 7 days on the free plan and 30 on a paid one,
+verified on
 [developers.cloudflare.com/d1/reference/time-travel](https://developers.cloudflare.com/d1/reference/time-travel/)
 on 2026-08-24. It only applies to databases on D1's production backend; `wrangler d1 info ringbolt`
 prints a `version` field, and `production` is the one that has it.
@@ -46,7 +47,8 @@ wrangler d1 time-travel info ringbolt          # the current bookmark, and how f
 Time Travel is inside the same account as the database it protects, so it covers a bad migration or
 a delete. It does not cover losing the account.
 
-**Off-platform: a scheduled export.** `.github/workflows/d1-backup.yml` runs
+The other leg lives off the platform, and it is the one that needs a decision.
+`.github/workflows/d1-backup.yml` runs
 `wrangler d1 export ringbolt --remote` on a schedule and keeps the dump as a build artifact, which
 is a different platform from the one holding the database. It is off until the repository variable
 `D1_BACKUP_ENABLED` is set to `true` and a `CLOUDFLARE_API_TOKEN` secret exists, and it fails loudly
@@ -61,7 +63,7 @@ wrangler d1 export ringbolt --remote --output ringbolt-$(date +%F).sql
 
 ## Restoring
 
-**A bad write, a bad migration, a wrong delete.** Time Travel, and it is the fastest answer:
+For a bad write, a bad migration or a wrong delete, Time Travel is the fastest answer:
 
 ```bash
 wrangler d1 time-travel restore ringbolt --timestamp=UNIX_TIMESTAMP
@@ -69,14 +71,14 @@ wrangler d1 time-travel restore ringbolt --timestamp=UNIX_TIMESTAMP
 wrangler d1 time-travel restore ringbolt --bookmark=BOOKMARK_ID
 ```
 
-**A lost account, or a dump you want to load into a fresh database.** The export is a plain SQL
-file, so the restore is an import:
+For a lost account, or a dump you want to load into a fresh database, the export is a plain SQL
+file and the restore is an import:
 
 ```bash
 wrangler d1 execute ringbolt --remote --file ringbolt-2026-08-24.sql -y
 ```
 
-**Rehearsed, not assumed.** `node scripts/restore-rehearsal.mjs` does the whole thing against the
+None of that is assumed to work. `node scripts/restore-rehearsal.mjs` does the whole thing against the
 LOCAL database: it seeds 2000 incidents, exports, drops every table, imports the export, and
 compares the row count either side. It refuses to run any command that does not carry `--local`.
 
@@ -100,7 +102,7 @@ wrangler versions list           # what has been deployed
 wrangler rollback [version-id]   # go back to one
 ```
 
-**One hard limit, and it is permanent for this product.** A rollback is refused when a Durable
+There is one hard limit, and it is permanent for this product. A rollback is refused when a Durable
 Object class lifecycle change has happened between the active version and the one you are rolling
 back to, per
 [developers.cloudflare.com/workers/configuration/versions-and-deployments/rollbacks](https://developers.cloudflare.com/workers/configuration/versions-and-deployments/rollbacks/),
