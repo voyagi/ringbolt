@@ -13,7 +13,7 @@
     "dev": "npm run build && wrangler dev",
     "dev:client": "vite --no-open",
     "dev:scheduled": "wrangler dev --test-scheduled",
-    "deploy": "wrangler deploy",
+    "deploy": "npm run build && wrangler deploy",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage.enabled --coverage.provider=istanbul --coverage.include=src/**/*.ts --coverage.include=src/**/*.tsx --coverage.exclude=src/**/*.test.ts --coverage.reporter=text",

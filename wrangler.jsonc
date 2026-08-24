@@ -4,6 +4,9 @@
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-08-11",
   "compatibility_flags": ["nodejs_compat"],
+  // `npm run deploy` builds before it uploads, because these are the built files and wrangler will
+  // happily deploy whatever is in the directory, including nothing. A deploy with no bundle answers
+  // every API call perfectly and 404s every page, which is a confusing way to find out.
   "assets": {
     "directory": "./dist/client",
     // Any path with no file behind it gets the dashboard, so a hard refresh on /incidents/inc_123
