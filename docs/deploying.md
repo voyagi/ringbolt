@@ -186,6 +186,11 @@ rollback, a call the responder held, an alert the policy refused to ring anybody
 nobody was heard on. It is idempotent, so calling it twice writes nothing twice, and the demo screen
 offers the same thing as a button while the estate is empty.
 
+**Seeding is refused on a real deployment**, and only a demo or a development build will do it. The
+estate carries two fictional contacts and puts them in the shared rota when there is no rota yet, so
+seeding an install somebody is actually on call for would quietly point Ringbolt at a number no
+network can route.
+
 Four things the worker refuses on such a deployment, none of them a screen deciding not to draw a
 button:
 

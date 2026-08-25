@@ -390,12 +390,12 @@ Two of those planted faults changed nothing, which was worth more than the ones 
 guards were being covered by a different rule rather than by a test of their own, and both now have
 one.
 
-The demo added twelve, all red: breaking what is already broken opening a second incident, the
+The demo added thirteen, all red: breaking what is already broken opening a second incident, the
 repair control pulling the floor out from under a call in flight, the read-only guard letting a
 write through, a public demo asking for the administrator token anyway, telephone numbers published
 on one, a demo wired to a real telephone, a runbook action allowed its allowlist, an unreadable
-switch value reading as off, seeding the example history twice, and three on the conversation the
-stand-in rehearses.
+switch value reading as off, the example history seeded into a rota somebody is on call for,
+seeding it twice, and three on the conversation the stand-in rehearses.
 
 The dashboard added seven more, all of which reddened the right test: the board route leaving the
 administrator guard, a set token no longer meaning a token is wanted, the deck focusing the least
