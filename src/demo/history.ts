@@ -652,6 +652,8 @@ function callOf(seed: CallSeed, now: Date): CallRecord {
     structuredResult: seed.structuredResult,
     transcript: seed.transcript,
     recordedAt: ago(now, seed.minutesAgo),
+    // The example history is minutes old, so nothing in it has reached a retention window yet.
+    redactedAt: null,
   };
 }
 

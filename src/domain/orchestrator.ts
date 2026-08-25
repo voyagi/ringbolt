@@ -186,6 +186,7 @@ export class Orchestrator {
       structuredResult: snapshot.structuredResult,
       transcript: snapshot.transcript,
       recordedAt: this.deps.now().toISOString(),
+      redactedAt: null,
     });
 
     await this.record(

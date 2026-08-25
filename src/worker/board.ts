@@ -181,6 +181,7 @@ export function toCallView(record: CallRecord | undefined): CallView | null {
     summary: record.summary,
     transcript: readTranscript(record.transcript),
     recordedAt: record.recordedAt,
+    redactedAt: record.redactedAt,
   };
 }
 

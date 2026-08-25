@@ -91,7 +91,7 @@ export type ActionRun = {
 /**
  * What was said on the call. It is kept here rather than left in CALL-E's records, which expire and
  * cannot be read without their API, and it is personal data: the endpoint that serves it is behind
- * the admin token, and phase 7 gives it a retention window.
+ * the admin token, and the retention sweep erases the words once the window has run out.
  */
 export type CallRecord = {
   callId: string;
@@ -104,6 +104,8 @@ export type CallRecord = {
   structuredResult: unknown;
   transcript: unknown;
   recordedAt: string;
+  /** When the words were erased, or null while they are still here. */
+  redactedAt: string | null;
 };
 
 type IncidentRow = {
@@ -167,6 +169,7 @@ type CallRecordRow = {
   structured_result: string | null;
   transcript: string;
   recorded_at: string;
+  redacted_at: string | null;
 };
 
 type ActionDefinitionRow = {
@@ -567,6 +570,11 @@ export class Repo {
     return results.map(toActionRun);
   }
 
+  /**
+   * The conflict clause refuses to write over a record whose words have already been erased. A
+   * provider retrying a delivery for a call old enough to have been redacted would otherwise put
+   * the transcript back, and a retention window that a webhook can undo is not a retention window.
+   */
   async recordCall(record: CallRecord): Promise<void> {
     await this.db
       .prepare(
@@ -579,7 +587,8 @@ export class Repo {
            summary = excluded.summary,
            structured_result = excluded.structured_result,
            transcript = excluded.transcript,
-           recorded_at = excluded.recorded_at`,
+           recorded_at = excluded.recorded_at
+         WHERE call_records.redacted_at IS NULL`,
       )
       .bind(
         record.callId,
@@ -604,6 +613,83 @@ export class Repo {
       .bind(incidentId)
       .all<CallRecordRow>();
     return results.map(toCallRecord);
+  }
+
+  /**
+   * Erases the words from every transcript older than the retention window, and says when it did.
+   *
+   * The row survives on purpose. An action run names the call that authorized it, so deleting the
+   * call record would leave a production change pointing at nothing. What goes is the recording of
+   * somebody speaking and the provider's prose summary of it; what stays is that the call happened,
+   * what it concluded, and that the words were erased rather than never captured.
+   *
+   * That last distinction is why `redacted_at` exists instead of an empty transcript being the
+   * marker. An empty transcript is the signature of the fault this whole product is built around,
+   * and a retention sweep that produced one would be manufacturing evidence of a bug.
+   */
+  async redactTranscriptsBefore(
+    recordedBefore: string,
+    at: string,
+    limit: number,
+  ): Promise<number> {
+    const result = await this.db
+      .prepare(
+        `UPDATE call_records SET transcript = '[]', summary = NULL, redacted_at = ?2
+         WHERE call_id IN (
+           SELECT call_id FROM call_records
+           WHERE recorded_at < ?1 AND redacted_at IS NULL
+           ORDER BY recorded_at ASC LIMIT ?3
+         )`,
+      )
+      .bind(recordedBefore, at, limit)
+      .run();
+    return result.meta.changes ?? 0;
+  }
+
+  /**
+   * Deletes closed incidents older than the retention window, and everything hanging off them.
+   *
+   * Only closed ones. An open incident holds its fingerprint against a unique index, so deleting one
+   * would free that fingerprint and the next repeat of its alert would telephone somebody about a
+   * problem already in hand. Age is no reason to do that: an incident still open after a year is a
+   * bug to look at, not a row to remove.
+   *
+   * Children first, because the incident is what they reference. The call ledger is deliberately
+   * not one of them: it records what was SPENT, in call ids and timestamps with no name and no
+   * number in them, and a retention sweep that made the money already spent go down would be
+   * reporting a figure nobody can reconcile against the provider's own bill.
+   */
+  async deleteClosedIncidentsBefore(
+    updatedBefore: string,
+    limit: number,
+  ): Promise<number> {
+    const { results } = await this.db
+      .prepare(
+        `SELECT id FROM incidents
+         WHERE state NOT IN (${OPEN_STATES}) AND updated_at < ?1
+         ORDER BY updated_at ASC LIMIT ?2`,
+      )
+      .bind(updatedBefore, limit)
+      .all<{ id: string }>();
+    if (results.length === 0) return 0;
+
+    const ids = results.map((row) => row.id);
+    const places = ids.map((_id, index) => `?${index + 1}`).join(", ");
+    await this.db.batch([
+      this.db
+        .prepare(`DELETE FROM action_runs WHERE incident_id IN (${places})`)
+        .bind(...ids),
+      this.db
+        .prepare(`DELETE FROM call_records WHERE incident_id IN (${places})`)
+        .bind(...ids),
+      this.db
+        .prepare(`DELETE FROM incident_events WHERE incident_id IN (${places})`)
+        .bind(...ids),
+      this.db
+        .prepare(`DELETE FROM incidents WHERE id IN (${places})`)
+        .bind(...ids),
+    ]);
+    return ids.length;
   }
 
   /**
@@ -845,6 +931,77 @@ export class Repo {
     await this.db.prepare(`DELETE FROM contacts WHERE id = ?1`).bind(id).run();
   }
 
+  /**
+   * Removes one person from everything Ringbolt copied them into, and says how much it changed.
+   *
+   * Deleting the contact row on its own is not erasure and never was. Their name was copied into
+   * the audit trail when an action ran, into the timeline every time they were called, and their
+   * voice is in the transcript of every call they answered. A product that deleted the row and
+   * called that done would be keeping all of it.
+   *
+   * Two decisions worth naming. The transcripts of their calls are erased rather than left, because
+   * a recording of somebody speaking is the most personal thing here. And the authority column is
+   * replaced rather than emptied: an action run with nobody on it reads as a production change
+   * nobody authorized, which is a different and false claim, so the record says a person authorized
+   * it and that their name was taken out at their own request.
+   *
+   * Counts come back so the operator can answer the person who asked.
+   */
+  async eraseContact(
+    contact: Contact,
+    marker: string,
+    at: string,
+  ): Promise<{
+    calls: number;
+    actionRuns: number;
+    incidents: number;
+    events: number;
+  }> {
+    const calls = await this.db
+      .prepare(
+        `UPDATE call_records
+         SET transcript = '[]', summary = NULL, structured_result = NULL, contact_id = NULL, redacted_at = ?2
+         WHERE contact_id = ?1`,
+      )
+      .bind(contact.id, at)
+      .run();
+
+    const actionRuns = await this.db
+      .prepare(
+        `UPDATE action_runs SET authorized_by = ?2, contact_id = NULL WHERE contact_id = ?1`,
+      )
+      .bind(contact.id, marker)
+      .run();
+
+    const incidents = await this.db
+      .prepare(`UPDATE incidents SET contact_id = NULL WHERE contact_id = ?1`)
+      .bind(contact.id)
+      .run();
+
+    // The timeline is free text with their name written into it, so the only way to be sure it is
+    // gone is to look everywhere for it rather than only under the incidents they were called
+    // about: an escalation names the NEXT person on somebody else's incident. Replacing a substring
+    // can catch a name inside a longer word, which is over-deletion, and over-deletion is the safe
+    // direction for a request to be forgotten.
+    const events = await this.db
+      .prepare(
+        `UPDATE incident_events
+         SET message = REPLACE(message, ?1, ?2), data = REPLACE(data, ?1, ?2)
+         WHERE message LIKE '%' || ?1 || '%' OR data LIKE '%' || ?1 || '%'`,
+      )
+      .bind(contact.name, marker)
+      .run();
+
+    await this.deleteContact(contact.id);
+
+    return {
+      calls: calls.meta.changes ?? 0,
+      actionRuns: actionRuns.meta.changes ?? 0,
+      incidents: incidents.meta.changes ?? 0,
+      events: events.meta.changes ?? 0,
+    };
+  }
+
   /** Which services still name this contact, so deleting one cannot quietly shorten a rota. */
   async rotationsNaming(contactId: string): Promise<string[]> {
     const { results } = await this.db
@@ -975,6 +1132,7 @@ function toCallRecord(row: CallRecordRow): CallRecord {
     structuredResult: parseJson(row.structured_result),
     transcript: parseJson(row.transcript) ?? [],
     recordedAt: row.recorded_at,
+    redactedAt: row.redacted_at,
   };
 }
 

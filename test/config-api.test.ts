@@ -204,6 +204,56 @@ describe("the configuration endpoints", () => {
       (await config("/contacts/con_nobody", { method: "DELETE" })).status,
     ).toBe(404);
   });
+
+  /**
+   * Erasure rewrites history and cannot be undone, so it is its own endpoint rather than a flag on
+   * delete. Everything it changed comes back as counts, because somebody has to be able to answer
+   * the person who asked.
+   */
+  it("erases a contact from the record and says how much it changed", async () => {
+    const { contact } = await bodyOf<{ contact: { id: string } }>(
+      await config("/contacts", {
+        method: "POST",
+        body: { name: "Marit", phone: "+31612345678" },
+      }),
+    );
+
+    const response = await config(`/contacts/${contact.id}/erase`, {
+      method: "POST",
+    });
+    expect(response.status).toBe(200);
+
+    const erased = await bodyOf<{ erased: Record<string, number> }>(response);
+    expect(erased.erased).toMatchObject({
+      calls: 0,
+      actionRuns: 0,
+      incidents: 0,
+      events: 0,
+    });
+    expect(await new Repo(env.DB).getContact(contact.id)).toBeNull();
+  });
+
+  it("refuses to erase somebody who is still on call", async () => {
+    const { contact } = await bodyOf<{ contact: { id: string } }>(
+      await config("/contacts", {
+        method: "POST",
+        body: { name: "Marit", phone: "+31612345678" },
+      }),
+    );
+    await config("/rotation/checkout", { body: { contactIds: [contact.id] } });
+
+    const refused = await config(`/contacts/${contact.id}/erase`, {
+      method: "POST",
+    });
+    expect(refused.status).toBe(409);
+    expect(await new Repo(env.DB).getContact(contact.id)).not.toBeNull();
+  });
+
+  it("answers an erasure for a contact that is not there", async () => {
+    expect(
+      (await config("/contacts/con_nobody/erase", { method: "POST" })).status,
+    ).toBe(404);
+  });
 });
 
 /**

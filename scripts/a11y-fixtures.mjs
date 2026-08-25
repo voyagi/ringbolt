@@ -72,7 +72,10 @@ const CHECKOUT = {
   offeredActions: ['rollback', 'kill_switch'],
   wakeAt: new Date(NOW + 260 * 1000).toISOString(),
   wakeReason: 'no_answer',
-  callAttempts: 2,
+  // Three, because the incident page below carries three call records and a page saying "call 3 of
+  // 3" beside a count of two is the kind of small disagreement that costs a reader their trust in
+  // everything else on it.
+  callAttempts: 3,
   rotationPosition: 1,
   callStartedAt: at(41),
   createdAt: at(650),
@@ -227,6 +230,7 @@ export const API_FIXTURES = {
     admin: 'demo',
     environment: 'production',
     calleMode: 'fake',
+    retention: { transcriptDays: 30, incidentDays: 365 },
   }),
   /**
    * The demo service mid-run: broken, with an incident already on the phone
@@ -277,6 +281,7 @@ export const API_FIXTURES = {
         summary: 'The responder authorized a rollback and it was carried out.',
         transcript: TRANSCRIPT,
         recordedAt: at(33),
+        redactedAt: null,
       },
       events: EVENTS,
       actions: [RUN],
@@ -306,6 +311,20 @@ export const API_FIXTURES = {
         summary: 'Nobody answered.',
         transcript: [],
         recordedAt: at(300),
+        redactedAt: null,
+      },
+      // A call whose words are gone. It is here rather than left to a live
+      // database because an erased transcript and a call nobody was heard on
+      // are both empty and mean opposite things, and this is the audit that
+      // reads what each of them actually says on screen.
+      {
+        status: 'completed',
+        taskCompleted: true,
+        confidence: 0.88,
+        summary: null,
+        transcript: [],
+        recordedAt: at(200),
+        redactedAt: at(90),
       },
       {
         status: 'completed',
@@ -314,6 +333,7 @@ export const API_FIXTURES = {
         summary: 'The responder authorized a rollback and it was carried out.',
         transcript: TRANSCRIPT,
         recordedAt: at(33),
+        redactedAt: null,
       },
     ],
     actions: [RUN],
