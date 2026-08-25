@@ -83,9 +83,10 @@ and the only thing that can produce one is the function that fetched it.
 completed, the task was completed, confidence clears the floor, the decision validates against the
 requested schema, the named action was actually offered on that call and is still permitted by that
 service's policy, the values the responder gave fit what the action declared it accepts, and, for
-anything destructive, the responder said the confirmation phrase. An individual action can demand
-more confidence than the product-wide floor. Any one of those failing is a refusal with a reason,
-recorded, not an error swallowed.
+anything destructive, the responder said the confirmation phrase and a turn of the transcript
+attributed to them carries those words. An individual action can demand more confidence than the
+product-wide floor. Any one of those failing is a refusal with a reason, recorded, not an error
+swallowed.
 
 **And silence cannot authorize anything.** A call has to carry at least one thing the responder
 actually said before any of the above is even considered. A transcript where only Ringbolt was
@@ -101,13 +102,19 @@ decision it extracted. So the floor filters calls that went badly, and it does n
 sure the transcription is about the word the responder actually said. The schema check, the
 offered-action check and the spoken confirmation phrase are what guard the decision itself.
 
-And a second limit on the last of those, found by planting a fault rather than by reading the code.
-The confirmation phrase is checked against the field CALL-E extracted, not against the transcript,
-so an action can run on a phrase that appears nowhere in what the responder is recorded as saying.
-The deck already holds the stricter rule: it marks a sentence as the authorization only when that
-sentence really contains the words. Making the gate ask the same question is the next thing on this
-path, and until it does, the claim here is that the provider reported the phrase rather than that
-the recording contains it.
+The confirmation phrase is why the transcript clause is there, and it was added because planting a
+fault found it missing. `confirmation_phrase` is a field the provider extracted from the
+conversation, so a decision can carry the exact words while the transcript carries nothing like
+them. Until 2026-08-25 the gate asked only whether the field matched, and a rehearsed call whose
+responder said "Go ahead." while the decision carried "roll it back" ran the rollback and resolved
+the incident. It now asks the second question too, matched the same way the deck marks which
+sentence granted permission, from one function both of them call.
+
+That check has a cost and it is taken deliberately. Transcription is lossy, so a responder who
+really did say the words can have them come back mangled, and such a call is now refused as
+`confirmation_not_in_transcript`. It refuses towards the rotation rather than towards silence: a
+refusal escalates, so the worst case is that the next person on the rota is telephoned about a live
+incident. The other direction is a production change nobody is recorded authorizing.
 
 ## What Ringbolt is allowed to do
 
@@ -389,6 +396,11 @@ the right test red.
 Two of those planted faults changed nothing, which was worth more than the ones that worked: both
 guards were being covered by a different rule rather than by a test of their own, and both now have
 one.
+
+The rule that a confirmation has to appear in the transcript was planted twice as well: taking the
+check out, and letting a turn Ringbolt itself spoke count as the responder saying it back. The first
+reddened three tests across the example suite and the property suite, the second reddened those and
+the deck's own test that it never marks a turn Ringbolt spoke.
 
 The demo added thirteen, all red: breaking what is already broken opening a second incident, the
 repair control pulling the floor out from under a call in flight, the read-only guard letting a

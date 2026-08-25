@@ -240,6 +240,36 @@ export function phrasesMatch(spoken: string, required: string): boolean {
   return normalisePhrase(spoken) === normalisePhrase(required);
 }
 
+/**
+ * Which turn is the responder saying the words an action demanded, or null when no turn is.
+ *
+ * The last one wins. A conversation can rehearse a phrase before agreeing to it, and the moment
+ * that counts is the one they finished on.
+ *
+ * Containment rather than equality, because a person says the phrase inside a sentence: "yes, roll
+ * it back then" carries it and an equality test would refuse it. The words themselves, in order,
+ * still have to be there.
+ *
+ * The authorization gate and the deck both read this, which is why it is here rather than in either
+ * of them. A gate that acted on a phrase the deck could not find would have nothing to draw the tie
+ * from, and a deck that marked a sentence the gate would have refused would be worse: both would be
+ * showing evidence for a decision made on something else.
+ */
+export function turnGranting(
+  transcript: readonly { speaker: string; text: string }[],
+  phrase: string,
+): number | null {
+  const wanted = normalisePhrase(phrase);
+  if (wanted === "") return null;
+
+  for (let index = transcript.length - 1; index >= 0; index -= 1) {
+    const turn = transcript[index];
+    if (turn === undefined || turn.speaker !== "user") continue;
+    if (normalisePhrase(turn.text).includes(wanted)) return index;
+  }
+  return null;
+}
+
 export type IncidentLinkView = { label: string; url: string };
 
 /** One incident as every screen reads it. The call id never appears: it is the one value the
