@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { ActionParameter, ParameterValue } from "../actions/definition.js";
 import { readParameters } from "../actions/parameters.js";
-import { phrasesMatch } from "./view.js";
+import { phrasesMatch, turnGranting } from "./view.js";
 
 /**
  * The shape Ringbolt asks CALL-E to extract from the conversation. It is sent as the call's
@@ -133,6 +133,7 @@ export type RefusalReason =
   | "confidence_below_action_floor"
   | "confirmation_missing"
   | "confirmation_mismatch"
+  | "confirmation_not_in_transcript"
   | "parameters_invalid";
 
 /**
@@ -230,7 +231,12 @@ export function authorize<TAction extends OfferedActionLike>(
     };
   }
 
-  const confirmation = checkConfirmation(action, decision, actionId);
+  const confirmation = checkConfirmation(
+    action,
+    decision,
+    actionId,
+    input.transcript,
+  );
   if (confirmation !== null) return confirmation;
 
   const read = readParameters(
@@ -269,10 +275,29 @@ function responderWasHeard(
   );
 }
 
+/**
+ * The three questions a destructive action's confirmation has to answer: was a phrase given at all,
+ * is it the phrase this action demands, and is anybody actually recorded saying it.
+ *
+ * The third is not the same question as the second, and until 2026-08-25 only the first two were
+ * asked. `confirmation_phrase` is a field the provider extracted from the conversation, so a
+ * decision can carry the exact words while the transcript carries nothing like them: an extraction
+ * that filled the field in from the task brief, an attribution that put the responder's turn under
+ * `unknown`, or a provider fault of the kind the 23 silent calls were. Planting exactly that left a
+ * production rollback running on a call whose only recorded human sentence was "Go ahead."
+ *
+ * The cost of asking is real and is accepted deliberately. Transcription is lossy, so a responder
+ * who genuinely said the words can have them come back mangled, and this refuses that call. It
+ * refuses towards the rotation rather than towards silence: a refusal here escalates, so the worst
+ * case is that the next person on the rota is telephoned about a live incident. The other direction
+ * is a production change nobody is recorded authorizing, which is the one thing this product exists
+ * not to do.
+ */
 function checkConfirmation<TAction extends OfferedActionLike>(
   action: TAction,
   decision: SpokenDecision,
   actionId: string,
+  transcript: readonly { speaker: string; text: string }[],
 ): Refusal<TAction> | null {
   const required = action.confirmationPhrase;
   if (required === undefined || required === null) return null;
@@ -291,6 +316,14 @@ function checkConfirmation<TAction extends OfferedActionLike>(
       authorized: false,
       refusal: "confirmation_mismatch",
       detail: `heard "${spoken}" but this action needs "${required}"`,
+      decision,
+    };
+  }
+  if (turnGranting(transcript, required) === null) {
+    return {
+      authorized: false,
+      refusal: "confirmation_not_in_transcript",
+      detail: `the decision carried "${spoken}", but no turn attributed to the person who answered contains those words, so nothing on this call records anybody saying them`,
       decision,
     };
   }

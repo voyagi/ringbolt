@@ -7,10 +7,25 @@ import { CONFIDENCE_FLOOR, authorize } from "./decision.js";
  * that have to hold for every input, including the ones nobody thought of, which is the half an
  * example suite cannot reach: an authorization gate is a claim about ALL calls, not about six.
  */
+const REQUIRED = "roll it back";
+
 const offered = [
   { id: "kill_switch" },
-  { id: "rollback", confirmationPhrase: "roll it back", minConfidence: 0.9 },
+  { id: "rollback", confirmationPhrase: REQUIRED, minConfidence: 0.9 },
 ];
+
+/**
+ * The same reduction to words the gate does, written out here rather than imported from it. A
+ * property that built its inputs with the function under test would agree with it by construction.
+ */
+function words(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ");
+}
 
 const speaker = fc.constantFrom("bot", "user", "unknown");
 
@@ -38,9 +53,26 @@ function blankOf(text: string): string {
   return " ".repeat(Math.min(text.length, 5));
 }
 
-const heard = fc
+/**
+ * Any transcript with something in it the responder actually said. Half of them carry the words the
+ * confirmed action demands: a generator that never said them would only ever exercise the action
+ * that needs no confirmation, and the property below is about what gets through.
+ */
+const heard = fc.oneof(
+  fc
+    .string({ minLength: 1 })
+    .filter((text) => text.trim() !== "")
+    .map((text) => [{ speaker: "user", text }]),
+  fc
+    .string()
+    .map((text) => [{ speaker: "user", text: `${text} roll it back` }]),
+);
+
+/** Heard, and provably not carrying the phrase, whatever the generator produced. */
+const heardWithoutThePhrase = fc
   .string({ minLength: 1 })
   .filter((text) => text.trim() !== "")
+  .filter((text) => !words(text).includes(REQUIRED))
   .map((text) => [{ speaker: "user", text }]);
 
 const decision = fc.record(
@@ -126,13 +158,7 @@ describe("what the authorization gate guarantees for every call", () => {
         fc.string(),
         confidence,
         (transcript, phrase, score) => {
-          const words = phrase
-            .toLowerCase()
-            .replace(/[^a-z0-9\s]/g, " ")
-            .trim();
-          fc.pre(
-            words.split(/\s+/).filter(Boolean).join(" ") !== "roll it back",
-          );
+          fc.pre(words(phrase) !== REQUIRED);
 
           const result = authorize({
             callStatus: "completed",
@@ -147,6 +173,39 @@ describe("what the authorization gate guarantees for every call", () => {
             offered,
           });
           expect(result.authorized).toBe(false);
+        },
+      ),
+    );
+  });
+
+  /**
+   * The other half of that rule, and the one that was missing until 2026-08-25: the phrase matching
+   * what the action demanded says the provider extracted those words, never that anybody said them.
+   * A confidence above the action's own floor is generated on purpose, so the refusal being asserted
+   * is this one rather than a cheaper check firing first.
+   */
+  it("never runs a confirmed action on words nobody is recorded saying", () => {
+    fc.assert(
+      fc.property(
+        heardWithoutThePhrase,
+        fc.double({ min: 0.9, max: 1, noNaN: true }),
+        (transcript, score) => {
+          const result = authorize({
+            callStatus: "completed",
+            taskCompleted: true,
+            confidenceScore: score,
+            structuredResult: {
+              decision: "run_action",
+              action_id: "rollback",
+              confirmation_phrase: REQUIRED,
+            },
+            transcript,
+            offered,
+          });
+          expect(result).toMatchObject({
+            authorized: false,
+            refusal: "confirmation_not_in_transcript",
+          });
         },
       ),
     );

@@ -4,7 +4,7 @@ import {
   type CallView,
   type TranscriptTurnView,
   asClock,
-  normalisePhrase,
+  turnGranting,
   verifiedFlag,
 } from "../../domain/view.js";
 
@@ -27,15 +27,7 @@ export function grantingTurn(
   phrase: string | null,
 ): number | null {
   if (phrase === null) return null;
-  const wanted = normalisePhrase(phrase);
-  if (wanted === "") return null;
-
-  for (let index = transcript.length - 1; index >= 0; index -= 1) {
-    const turn = transcript[index];
-    if (turn === undefined || turn.speaker !== "user") continue;
-    if (normalisePhrase(turn.text).includes(wanted)) return index;
-  }
-  return null;
+  return turnGranting(transcript, phrase);
 }
 
 /**

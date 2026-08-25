@@ -20,6 +20,14 @@ const heard = [
   { speaker: "user", text: "Right. Turn it off." },
 ];
 
+/**
+ * The same call, with the responder heard saying the words a confirmed action demands. A confirmed
+ * action needs both halves now: the extracted phrase and a turn that carries it.
+ */
+function heardSaying(phrase: string) {
+  return [...heard, { speaker: "user", text: `${phrase}, then.` }];
+}
+
 const base: AuthorizationInput<(typeof offered)[number]> = {
   callStatus: "completed",
   taskCompleted: true,
@@ -260,10 +268,80 @@ describe("authorize", () => {
   it("accepts a confirmation that differs only in casing, punctuation and spacing", () => {
     const result = authorize({
       ...base,
+      transcript: heardSaying("Roll it back"),
       structuredResult: {
         decision: "run_action",
         action_id: "rollback",
         confirmation_phrase: "  Roll it, back. ",
+      },
+    });
+    expect(result).toMatchObject({
+      authorized: true,
+      action: { id: "rollback" },
+    });
+  });
+
+  /**
+   * The finding this rule exists for, planted: a decision carrying the exact phrase on a call whose
+   * only recorded human sentence is something else. Everything else about it is perfect.
+   */
+  it("refuses a confirmed action nobody is recorded saying the words on", () => {
+    const result = authorize({
+      ...base,
+      transcript: [
+        { speaker: "bot", text: "Say roll it back to confirm." },
+        { speaker: "user", text: "Go ahead." },
+      ],
+      structuredResult: {
+        decision: "run_action",
+        action_id: "rollback",
+        confirmation_phrase: "roll it back",
+      },
+    });
+    expect(result).toMatchObject({
+      authorized: false,
+      refusal: "confirmation_not_in_transcript",
+    });
+  });
+
+  /** Ringbolt reading the phrase out is not the responder saying it back. */
+  it("does not accept the caller's own turn as the confirmation", () => {
+    const result = authorize({
+      ...base,
+      transcript: [
+        { speaker: "bot", text: "I can roll it back. Say roll it back." },
+        { speaker: "user", text: "Fine." },
+      ],
+      structuredResult: {
+        decision: "run_action",
+        action_id: "rollback",
+        confirmation_phrase: "roll it back",
+      },
+    });
+    expect(result).toMatchObject({
+      authorized: false,
+      refusal: "confirmation_not_in_transcript",
+    });
+  });
+
+  /**
+   * Nobody says a confirmation as a bare utterance, so the words are looked for inside the sentence
+   * they were said in. Requiring the whole turn to be the phrase would refuse most real calls.
+   */
+  it("finds the words inside the sentence they were said in", () => {
+    const result = authorize({
+      ...base,
+      transcript: [
+        { speaker: "bot", text: "Say roll it back to confirm." },
+        {
+          speaker: "user",
+          text: "Yes, roll it back please, I am watching it.",
+        },
+      ],
+      structuredResult: {
+        decision: "run_action",
+        action_id: "rollback",
+        confirmation_phrase: "roll it back",
       },
     });
     expect(result).toMatchObject({
@@ -369,6 +447,7 @@ describe("authorizing the values an action was given", () => {
     const result = authorize({
       ...spoken,
       confidenceScore: 0.99,
+      transcript: heardSaying("wipe it"),
       structuredResult: {
         decision: "run_action",
         action_id: "wipe",
@@ -405,6 +484,7 @@ describe("authorizing the values an action was given", () => {
       authorize({
         ...spoken,
         confidenceScore: 0.96,
+        transcript: heardSaying("wipe it"),
         structuredResult: {
           decision: "run_action",
           action_id: "wipe",
