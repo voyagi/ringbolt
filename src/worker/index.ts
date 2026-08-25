@@ -53,6 +53,7 @@ import {
 } from "./board.js";
 import { incidentStub } from "./incident-client.js";
 import { reconcile } from "./reconcile.js";
+import { enforceRetention } from "./retention.js";
 import { buildPlacer, newId, waitUntilScheduler } from "./wiring.js";
 
 export { IncidentDurableObject } from "./incident-do.js";
@@ -63,6 +64,13 @@ export { IncidentDurableObject } from "./incident-do.js";
  * isolate handling it died mid-flight.
  */
 const CLAIM_STALE_AFTER_MS = 2 * 60 * 1000;
+
+/**
+ * What stands where an erased person's name used to be. It is a sentence rather than a blank
+ * because the audit trail has to keep saying that a human authorized the change: an action run with
+ * nobody on it reads as one nobody authorized, which is a different claim and a false one.
+ */
+const ERASED_CONTACT = "a contact erased at their own request";
 
 const app = new Hono<{ Bindings: Bindings }>();
 
@@ -132,6 +140,10 @@ app.get("/api/session", (c) => {
     admin: adminMode(config),
     environment: config.RINGBOLT_ENV,
     calleMode: config.CALLE_MODE,
+    retention: {
+      transcriptDays: config.RETENTION_TRANSCRIPT_DAYS,
+      incidentDays: config.RETENTION_INCIDENT_DAYS,
+    },
   };
   return c.json(session);
 });
@@ -543,6 +555,44 @@ app.delete("/api/config/contacts/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+/**
+ * The right to be forgotten, carried out rather than promised.
+ *
+ * It is a separate endpoint from DELETE rather than a flag on it, because they answer different
+ * questions. Deleting a contact is "this person is no longer on call": it leaves the audit trail
+ * exactly as it was, which is what an operator changing a rota wants. Erasing is "take this person
+ * out of the record", which rewrites history and cannot be undone, and something that irreversible
+ * should not be reachable by adding a query parameter to a routine request.
+ *
+ * The rota guard is the same one delete has and it is kept here on purpose. Erasing somebody who is
+ * still on call would silently shorten the rotation, which is discovered at three in the morning,
+ * so the operator takes them off it first and decides who covers the shift. It is one extra request
+ * against nobody being called.
+ */
+app.post("/api/config/contacts/:id/erase", async (c) => {
+  const repo = new Repo(c.env.DB);
+  const contact = await repo.getContact(c.req.param("id"));
+  if (contact === null) return c.json({ error: "no such contact" }, 404);
+
+  const rotas = await repo.rotationsNaming(contact.id);
+  if (rotas.length > 0) {
+    return c.json(
+      {
+        error: `this contact is still in the rotation for ${rotas.join(", ")}, so take them out of it first. Erasing somebody who is still on call would shorten the rotation without saying so.`,
+        services: rotas,
+      },
+      409,
+    );
+  }
+
+  const erased = await repo.eraseContact(
+    contact,
+    ERASED_CONTACT,
+    new Date().toISOString(),
+  );
+  return c.json({ erased });
+});
+
 app.get("/api/config/rotation/:service", async (c) => {
   const repo = new Repo(c.env.DB);
   const service = c.req.param("service");
@@ -844,6 +894,21 @@ export default {
     env: Bindings,
     _ctx: ExecutionContext,
   ): Promise<void> {
-    await reconcile(env, { now: () => new Date() });
+    const now = new Date();
+    await reconcile(env, { now: () => now });
+
+    // Retention runs on the same trigger and after it, because it deletes closed incidents and the
+    // sweep above is what closes them. Its own failures are caught inside it: a retention window
+    // that stopped working would otherwise take the incident backstop down with it, and an incident
+    // that never gets swept is a service whose alerts have quietly stopped ringing.
+    const config = readConfig(env);
+    await enforceRetention(
+      new Repo(env.DB),
+      {
+        transcriptDays: config.RETENTION_TRANSCRIPT_DAYS,
+        incidentDays: config.RETENTION_INCIDENT_DAYS,
+      },
+      now,
+    );
   },
 };

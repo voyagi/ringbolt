@@ -137,6 +137,25 @@ export function Transcript({
   grant: number | null;
 }): ReactNode {
   if (call.transcript.length === 0) {
+    // An erased transcript and a call nobody was heard on are both empty, and they mean opposite
+    // things: one is the retention window doing its job, the other is the fault this product was
+    // built around. Saying which is why the record carries the date the words went.
+    if (call.redactedAt !== null) {
+      return (
+        <>
+          <p className="heard">
+            The words of this call were erased on {call.redactedAt.slice(0, 10)}
+            .
+          </p>
+          <p className="heard">
+            Ringbolt does not keep a transcript indefinitely, and a person can
+            ask to be taken out of the record. What was decided and what ran are
+            still below.
+          </p>
+        </>
+      );
+    }
+
     // Two sentences rather than one with an emphasised phrase inside it. An
     // inline element that wraps across lines is one axe declines to judge for
     // contrast, and an undetermined result is not a clean one.

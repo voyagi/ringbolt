@@ -60,6 +60,27 @@ const shared = {
    * cannot spend a cent until somebody writes down what they are prepared to lose.
    */
   CALLE_CREDIT_USD: z.coerce.number().min(0).max(50).default(0),
+  /**
+   * How many days a transcript is kept for. After that the sweep erases the words and the summary,
+   * leaving the row saying that a call happened, what it concluded, and when it was redacted.
+   *
+   * Thirty days by default, which is long enough to work out what happened in an incident somebody
+   * is still arguing about and short enough that a recording of a person speaking is not kept
+   * indefinitely for no stated purpose. It is the shortest of the two windows on purpose: the
+   * transcript is the most personal thing here and the least useful once the incident is closed.
+   */
+  RETENTION_TRANSCRIPT_DAYS: blankIsAbsent(
+    z.coerce.number().int().min(1).max(3650).default(30),
+  ),
+  /**
+   * How many days a CLOSED incident is kept for, after which it and everything hanging off it are
+   * deleted outright: its events, the calls placed about it, and the actions that ran. An open
+   * incident is never touched, however old it is, because deleting one would free its fingerprint
+   * and the next repeat of that alert would ring a telephone about something already in hand.
+   */
+  RETENTION_INCIDENT_DAYS: blankIsAbsent(
+    z.coerce.number().int().min(1).max(3650).default(365),
+  ),
   /** How long the local stand-in waits before a call reaches a terminal state. Fake mode only. */
   CALLE_FAKE_DELAY_MS: z.coerce
     .number()

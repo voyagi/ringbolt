@@ -320,6 +320,55 @@ call nobody was heard on, carrying a schema-valid instruction to change producti
 confidence, refused. That is the most important thing in the seeded history and it is why it is
 there.
 
+## What is kept, and for how long
+
+Ringbolt holds three things about a person: their name and number in the rota, the transcript of
+every call they answered, and their name against any action they authorized. All three are personal
+data, and a product that stores them and never deletes anything does not have a retention policy, it
+has the absence of one.
+
+Two windows, because two different things are kept for two different reasons.
+
+**Transcripts, thirty days.** After that the sweep erases the words and the provider's summary of
+them, and the record keeps saying that a call happened, what it concluded, and the date the words
+went. The row survives because an action that changed a production system points at the call that
+authorized it, and a run pointing at nothing is worse than no record at all. The date matters as
+much as the erasure: an empty transcript is also the signature of the fault this product was built
+around, so a screen showing an erased call says so rather than letting it read as a call nobody was
+heard on.
+
+**Closed incidents, a year.** Then the incident is deleted outright, with its events, its calls and
+its action runs. An open incident is never deleted, whatever its age: it holds its fingerprint
+against a unique index, and freeing that would telephone somebody about a problem already in hand.
+The call ledger is not touched either, because it records what was spent, in call ids and timestamps
+with no name in them, and a figure that goes down cannot be reconciled against the provider's bill.
+
+Both are `RETENTION_TRANSCRIPT_DAYS` and `RETENTION_INCIDENT_DAYS`, they run on the same cron as the
+reconciliation sweep, and the settings screen reads the numbers the sweep is actually running on
+rather than a sentence somebody typed into a document.
+
+**Erasing one person is its own request**, because it rewrites history and cannot be undone:
+
+```bash
+curl -X POST -H "authorization: Bearer $ADMIN_TOKEN" \
+  http://localhost:8787/api/config/contacts/con_.../erase
+```
+
+It removes the contact, erases the words of every call they answered, takes their name out of the
+timeline wherever it was written into a sentence, and replaces the authority on any action they
+authorized with "a contact erased at their own request". That last one is deliberate: an action run
+with nobody on it reads as a production change nobody authorized, which is a different claim and a
+false one. It comes back with a count of everything it changed, so the operator can answer the
+person who asked, and it refuses while they are still in a rota, because erasing somebody who is on
+call would shorten the rotation without saying so.
+
+**CALL-E keeps its own copy and offers no way to delete it.** Their Developer API has no retention
+setting and no delete on any path, which is not an inference from the documentation: it is what the
+generated schema in their own SDK says. So the honest position is that Ringbolt controls its copy
+and not theirs, and what is sent is kept to the number to dial and the incident facts. The brief
+carries no name: the responder's name is never sent, and neither is anything about who else is in
+the rota.
+
 ## What the person on the phone is told
 
 Every call opens by saying it is Ringbolt and that it is an automated system rather than a person,
@@ -456,9 +505,8 @@ that reaches anything else.
 Not built yet, and not pretended to be:
 
 - Authentication and per-tenant isolation. Everything the dashboard reads and writes is behind one
-  shared administrator token, `/api/incidents` is open, and there is no retention window that
-  deletes a transcript on a schedule. All three are stated here rather than left for somebody to
-  discover.
+  shared administrator token, and `/api/incidents` is open. Both are stated here rather than left
+  for somebody to discover.
 
 ## Licence
 

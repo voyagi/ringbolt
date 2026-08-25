@@ -310,6 +310,14 @@ export type CallView = {
   summary: string | null;
   transcript: TranscriptTurnView[];
   recordedAt: string;
+  /**
+   * When the words were erased under the retention window, or null while they are still here.
+   *
+   * A screen has to be able to tell the two apart. An empty transcript is also the signature of the
+   * fault this product was built around, a call where the responder was never heard, and drawing a
+   * retained-and-erased call as one of those would be inventing evidence of a bug.
+   */
+  redactedAt: string | null;
 };
 
 export type ActionRunView = {
@@ -469,8 +477,22 @@ export type DemoView = {
  */
 export type AdminMode = "open" | "token" | "unavailable" | "demo";
 
+/**
+ * How long this deployment keeps what it holds. It is on the session rather than behind the
+ * configuration API because it is a statement about the deployment that anybody reading a screen is
+ * entitled to, and because the settings page's answer to "what is kept" has to be the number the
+ * sweep is actually running on rather than a sentence somebody typed into a document.
+ */
+export type RetentionView = {
+  /** Days before the words of a call are erased, leaving the record that it happened. */
+  transcriptDays: number;
+  /** Days before a closed incident is deleted outright, with everything hanging off it. */
+  incidentDays: number;
+};
+
 export type SessionView = {
   admin: AdminMode;
   environment: "development" | "preview" | "production";
   calleMode: "fake" | "live";
+  retention: RetentionView;
 };

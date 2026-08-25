@@ -122,14 +122,29 @@ export function Settings({
         </section>
 
         <section className="card">
-          <h2>WHAT IS KEPT</h2>
-          <p className="note" style={{ marginTop: 0 }}>
-            Ringbolt stores the incident, the transcript of every call it placed
-            about it, the decision that came back and what ran. A transcript and
-            a telephone number are personal data. Both sit behind the
-            administration token today, and a retention window that deletes them
-            on a schedule is phase 7 rather than something this build already
-            does.
+          <h2>WHAT IS KEPT, AND FOR HOW LONG</h2>
+          <dl className="pairs">
+            <dt>Transcripts</dt>
+            <dd className="mono">
+              {session.retention.transcriptDays} days, then the words are erased
+            </dd>
+            <dt>Closed incidents</dt>
+            <dd className="mono">
+              {session.retention.incidentDays} days, then deleted outright
+            </dd>
+          </dl>
+          <p className="note">
+            The sweep runs every minute and enforces both. Erasing a transcript
+            leaves the record that the call happened and what it concluded,
+            because an action that changed a production system has to point at
+            the call that authorized it. Deleting a closed incident takes its
+            events, its calls and its action runs with it.
+          </p>
+          <p className="note">
+            An open incident is never deleted, whatever its age. To erase one
+            person from the record, take them out of every rota and then use the
+            erasure endpoint, which removes the contact and scrubs their name
+            and their words from everything that copied them.
           </p>
         </section>
       </div>
