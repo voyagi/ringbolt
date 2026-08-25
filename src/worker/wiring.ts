@@ -8,6 +8,7 @@ import {
 import { LiveCallPlacer } from "../calle/live.js";
 import type { CallPlacer, PlaceCallInput, Scheduler } from "../calle/port.js";
 import { Repo } from "../db/repo.js";
+import { DEMO_SERVICE, HEALTHY_RELEASE } from "../demo/service.js";
 import type {
   ActionEnvironment,
   Exclusive,
@@ -69,6 +70,71 @@ export const unscheduledWakes: WakeScheduler = {
   schedule: async () => undefined,
   clear: async () => undefined,
 };
+
+/**
+ * The conversation the stand-in rehearses when the call is about the demo service.
+ *
+ * The demo has to show what this product actually claims rather than the shortest route to a
+ * decision: somebody asks a question, gets an answer, names the release they want back, and then
+ * says the exact words the action demanded. The deck draws its line from that sentence down into
+ * the action it allowed, and it draws it only where those words are really present, so a demo
+ * without them would be a demo missing the one graphic the whole product is about.
+ *
+ * It replaces only the DEFAULT scenario. A deployment that has asked the stand-in for a no answer
+ * or a hang-up gets that on the demo service too, because choosing a scenario is how the refusal
+ * paths are exercised.
+ */
+function demoConversation(afterMs: number): FakeScenario {
+  return {
+    kind: "answers",
+    afterMs,
+    confidence: 0.93,
+    decision: {
+      decision: "run_action",
+      action_id: "rollback",
+      confirmation_phrase: "roll it back",
+      action_parameters: { release: HEALTHY_RELEASE },
+      reason: "The release is the only thing that changed.",
+    },
+    turns: [
+      {
+        offsetSeconds: 12,
+        speaker: "user",
+        text: "Is anything else touching payments?",
+      },
+      {
+        offsetSeconds: 15,
+        speaker: "bot",
+        text: "No. Search and accounts are both clean, and the only change in the window is that release.",
+      },
+      {
+        offsetSeconds: 21,
+        speaker: "user",
+        text: `Put it back on ${HEALTHY_RELEASE} then.`,
+      },
+      {
+        offsetSeconds: 26,
+        speaker: "bot",
+        text: `I can roll ${DEMO_SERVICE} back to ${HEALTHY_RELEASE}. Say roll it back to confirm.`,
+      },
+      { offsetSeconds: 31, speaker: "user", text: "Roll it back." },
+    ],
+  };
+}
+
+function defaultScenario(
+  config: RingboltConfig,
+  input: PlaceCallInput,
+): FakeScenario {
+  const afterMs = config.CALLE_FAKE_DELAY_MS;
+  if (
+    config.CALLE_FAKE_SCENARIO === "answers" &&
+    input.metadata["service"] === DEMO_SERVICE
+  ) {
+    return demoConversation(afterMs);
+  }
+  return scenarioOf(config.CALLE_FAKE_SCENARIO, afterMs);
+}
 
 /** What the stand-in does on a call, chosen by configuration rather than by the code path. */
 function scenarioOf(kind: FakeScenarioKind, afterMs: number): FakeScenario {
@@ -152,9 +218,7 @@ export function buildPlacer(
     store: new D1FakeCallStore(env.DB, now),
     scheduler: options.scheduler,
     scenarioFor:
-      options.scenarioFor ??
-      (() =>
-        scenarioOf(config.CALLE_FAKE_SCENARIO, config.CALLE_FAKE_DELAY_MS)),
+      options.scenarioFor ?? ((input) => defaultScenario(config, input)),
     now,
   });
 }

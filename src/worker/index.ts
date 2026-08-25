@@ -13,18 +13,29 @@ import {
   actionIdPattern,
 } from "../actions/definition.js";
 import { Repo, SHARED_ROTATION } from "../db/repo.js";
+import { demoHistoryPresent, seedDemoHistory } from "../demo/history.js";
+import {
+  breakDemoService,
+  demoAlert,
+  readDemo,
+  repairDemoService,
+} from "../demo/service.js";
 import {
   type Incident,
   alertPayload,
   fingerprintFor,
 } from "../domain/incident.js";
-import { incidentIdOf } from "../domain/orchestrator.js";
+import { type OpenResult, incidentIdOf } from "../domain/orchestrator.js";
 import {
   type ServicePolicy,
   defaultPolicy,
   servicePolicyInput,
 } from "../domain/policy.js";
-import { contactInput, rotationInput } from "../domain/rotation.js";
+import {
+  type Contact,
+  contactInput,
+  rotationInput,
+} from "../domain/rotation.js";
 import {
   ConfigurationError,
   type Bindings,
@@ -54,6 +65,43 @@ export { IncidentDurableObject } from "./incident-do.js";
 const CLAIM_STALE_AFTER_MS = 2 * 60 * 1000;
 
 const app = new Hono<{ Bindings: Bindings }>();
+
+/**
+ * The paths a public demo may still be written through. Everything else is refused outright while
+ * DEMO_MODE is on, whatever token the caller presents, and that is the whole of what read-only
+ * means here: it is a property of the deployment, checked in one place, rather than a set of
+ * buttons a screen does not draw.
+ *
+ * The two that are not demo controls are each here for a reason. Intake is how an alert arrives and
+ * it carries its own token, so it was never open to a stranger. The webhook is how a call comes
+ * back, and nothing in its body is believed anyway: the call is read back from the provider before
+ * any of it is acted on.
+ */
+const WRITABLE_ON_A_PUBLIC_DEMO = [
+  "/api/demo/break",
+  "/api/demo/repair",
+  "/api/demo/seed",
+  "/webhooks/calle",
+];
+
+const publicDemoIsReadOnly: MiddlewareHandler<{ Bindings: Bindings }> = async (
+  c,
+  next,
+) => {
+  if (isPublicDemo(c.env) && changesSomething(c.req.method, c.req.path)) {
+    return c.json(
+      {
+        error:
+          "this deployment is the public demo, so it is read only apart from the demo controls",
+      },
+      403,
+    );
+  }
+  await next();
+  return undefined;
+};
+
+app.use("*", publicDemoIsReadOnly);
 
 app.get("/health", (c) => {
   try {
@@ -112,21 +160,33 @@ app.post("/intake/:token", async (c) => {
   }
 
   const alert = parsed.data;
-  const result = await incidentStub(c.env, fingerprintFor(alert)).open(alert);
+  return openedAnswer(
+    c,
+    await incidentStub(c.env, fingerprintFor(alert)).open(alert),
+  );
+});
+
+/**
+ * How an accepted alert is answered, whichever door it arrived through: the intake endpoint a
+ * monitor posts to, or the demo service's own break control.
+ *
+ * A telephone that would not dial is reported as such rather than as an accepted alert. The
+ * incident is closed as failed, so the sender retrying makes a fresh attempt instead of being
+ * answered as a duplicate of the one that never rang.
+ */
+function openedAnswer(
+  c: Context<{ Bindings: Bindings }>,
+  result: OpenResult,
+): Response {
   const body = {
     incident: result.incident.id,
     state: result.incident.state,
     duplicate: result.kind === "duplicate",
   };
-
-  // A telephone that would not dial is reported as such rather than as an accepted alert. The
-  // incident is closed as failed, so the sender retrying makes a fresh attempt instead of being
-  // answered as a duplicate of the one that never rang.
   if (result.kind === "call_failed")
     return c.json({ ...body, error: result.detail }, 502);
-
   return c.json(body, 202);
-});
+}
 
 /**
  * CALL-E delivers this unsigned, so nothing in the body is treated as fact. The delivery is used
@@ -242,6 +302,58 @@ app.use("/api/config/*", adminOnly);
 // The audit trail carries the call transcript, which is personal data and is also the evidence
 // behind a production change. Neither belongs on the open read API.
 app.use("/api/audit/*", adminOnly);
+
+// The demo controls change a service's state and place a call, so on any deployment that is not the
+// public demo they are guarded exactly like the configuration is. On the public demo the guard
+// itself stands down, which is the one thing that deployment exists to allow.
+//
+// The wildcard covers the bare `/api/demo` as well as the controls under it, which is deliberate
+// and was also measured rather than assumed: `test/demo.test.ts` asserts both halves. The read is
+// no more public than the board it sits beside.
+app.use("/api/demo/*", adminOnly);
+
+/**
+ * What the demo service says about itself: which release it is running, whether it has been
+ * switched off, what it is therefore serving, and which of its controls may be pressed right now.
+ */
+app.get("/api/demo", async (c) => {
+  const repo = new Repo(c.env.DB);
+  return c.json(
+    await readDemo(repo, new Date(), {
+      publicDemo: readConfig(c.env).DEMO_MODE,
+      seeded: await demoHistoryPresent(repo),
+    }),
+  );
+});
+
+/**
+ * Puts the bad release out and tells Ringbolt about it, through the same orchestrator every other
+ * alert goes through. The refusal is the same function the screen's own controls are drawn from, so
+ * a button that looks pressable and a request that is refused cannot disagree.
+ */
+app.post("/api/demo/break", async (c) => {
+  const broken = await breakDemoService(new Repo(c.env.DB), new Date());
+  if (!broken.ok) return c.json({ error: broken.why }, 409);
+
+  const alert = demoAlert(broken.state);
+  return openedAnswer(
+    c,
+    await incidentStub(c.env, fingerprintFor(alert)).open(alert),
+  );
+});
+
+/** Puts the demo service back by hand, which is the operator acting rather than Ringbolt. */
+app.post("/api/demo/repair", async (c) => {
+  const repaired = await repairDemoService(new Repo(c.env.DB), new Date());
+  if (!repaired.ok) return c.json({ error: repaired.why }, 409);
+  return c.json({ state: repaired.state });
+});
+
+/** The example estate, written once. A second call finds it already there and writes nothing. */
+app.post("/api/demo/seed", async (c) => {
+  const result = await seedDemoHistory(new Repo(c.env.DB), new Date());
+  return c.json(result, result.seeded ? 201 : 200);
+});
 
 app.get("/api/config/actions", async (c) => {
   const repo = new Repo(c.env.DB);
@@ -372,7 +484,9 @@ app.put("/api/config/services/:service", async (c) => {
 
 app.get("/api/config/contacts", async (c) => {
   const repo = new Repo(c.env.DB);
-  return c.json({ contacts: await repo.listContacts() });
+  return c.json({
+    contacts: readable(await repo.listContacts(), readConfig(c.env)),
+  });
 });
 
 app.post("/api/config/contacts", async (c) => {
@@ -417,7 +531,7 @@ app.get("/api/config/rotation/:service", async (c) => {
   const contacts = await repo.rotationFor(service);
   return c.json({
     service,
-    contacts,
+    contacts: readable(contacts, readConfig(c.env)),
     own: await repo.hasOwnRotation(service),
     sharedRotation: SHARED_ROTATION,
     // With nobody in the rota, the number in the configuration is who gets called. Saying so is
@@ -449,7 +563,10 @@ app.put("/api/config/rotation/:service", async (c) => {
 
   const service = c.req.param("service");
   await repo.setRotation(service, ids);
-  return c.json({ service, contacts: await repo.rotationFor(service) });
+  return c.json({
+    service,
+    contacts: readable(await repo.rotationFor(service), readConfig(c.env)),
+  });
 });
 
 /**
@@ -595,6 +712,7 @@ function unprocessable(
  * given and the answer it then meets cannot disagree.
  */
 function adminMode(config: RingboltConfig): AdminMode {
+  if (config.DEMO_MODE) return "demo";
   if (config.ADMIN_TOKEN !== undefined) return "token";
   return config.RINGBOLT_ENV === "development" ? "open" : "unavailable";
 }
@@ -604,6 +722,11 @@ function adminRefusal(
   c: Context<{ Bindings: Bindings }>,
   config: RingboltConfig,
 ): Response | null {
+  // A public demo has already refused every write except its own controls, and it cannot be in live
+  // mode at all, so a token here would be guarding nothing that is still reachable. What it would do
+  // is make the demo unreadable, which is the one thing that deployment exists for.
+  if (config.DEMO_MODE) return null;
+
   const expected = config.ADMIN_TOKEN;
   if (expected === undefined) {
     if (adminMode(config) === "open") return null;
@@ -633,10 +756,50 @@ function withoutCallId(incident: Incident): Omit<Incident, "callId"> {
   return rest;
 }
 
+/**
+ * Contacts as a reader is allowed to see them. A public demo publishes everything it holds, so the
+ * telephone numbers come out of it: a number is personal data and nobody consented to a stranger
+ * reading theirs.
+ *
+ * Names stay. They are who authorized a production change, which is the whole point of the record,
+ * and a demo with the authority column blanked would be a demo of a different product. The honest
+ * consequence is that a demo deployment must not share a database with a real one, and
+ * `docs/deploying.md` says so in those words.
+ */
+function readable(contacts: Contact[], config: RingboltConfig): Contact[] {
+  if (!config.DEMO_MODE) return contacts;
+  return contacts.map((contact) => ({
+    ...contact,
+    phone: "withheld on a public demo",
+  }));
+}
+
 /** The list view is a board, so it carries what a board shows and nothing else. */
 function forPublicList(incident: Incident) {
   const { detail: _withheld, ...rest } = withoutCallId(incident);
   return rest;
+}
+
+/**
+ * Whether this deployment is the public demo.
+ *
+ * A configuration nothing can parse reads as "not the demo", which sounds like a hole and is not
+ * one: every route reads the same configuration and answers 500 on it, so there is no write left
+ * for this to refuse. Doing it this way keeps the health check's own answer about what is wrong,
+ * which is the one page an operator has when the configuration is the problem.
+ */
+function isPublicDemo(env: Bindings): boolean {
+  try {
+    return readConfig(env).DEMO_MODE;
+  } catch {
+    return false;
+  }
+}
+
+function changesSomething(method: string, path: string): boolean {
+  if (method === "GET" || method === "HEAD") return false;
+  if (WRITABLE_ON_A_PUBLIC_DEMO.includes(path)) return false;
+  return !path.startsWith("/intake/");
 }
 
 /**

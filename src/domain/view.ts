@@ -394,7 +394,50 @@ export type ServicePolicyView = {
 
 export type ContactView = { id: string; name: string; phone: string };
 
-export type AdminMode = "open" | "token" | "unavailable";
+/**
+ * How the demo service is doing. Three answers rather than two, because a service somebody has
+ * switched off is not a healthy service and it is not a failing one either: it is the outcome of
+ * the other action Ringbolt can be authorized to take, and drawing it as either of the other two
+ * would hide what just happened to it.
+ */
+export type DemoHealth = "serving" | "failing" | "off";
+
+/** A control on the demo screen, and the server's reason when it may not be pressed. */
+export type DemoControl = { available: boolean; why: string | null };
+
+export type DemoIncidentView = {
+  id: string;
+  state: IncidentState;
+  wakeAt: string | null;
+  callAttempts: number;
+};
+
+export type DemoView = {
+  service: string;
+  health: DemoHealth;
+  activeRelease: string;
+  previousRelease: string | null;
+  killSwitch: boolean;
+  /** What the demo service reports it is serving, against what it serves when it is well. */
+  errorPercent: number;
+  baselinePercent: number;
+  faultyRelease: string;
+  healthyRelease: string;
+  changedAt: string | null;
+  /** The server's clock, for the same reason the board carries one. */
+  now: string;
+  incident: DemoIncidentView | null;
+  controls: { breakIt: DemoControl; repair: DemoControl; seed: DemoControl };
+  /** True when this deployment is the public demo, so nothing on it may be written. */
+  publicDemo: boolean;
+};
+
+/**
+ * How this deployment guards the screens that carry transcripts and decide which telephone rings.
+ * `demo` is the public one: it refuses every write except the demo controls and it cannot be in
+ * live mode at all, so there is nothing left for a token to protect on the way in.
+ */
+export type AdminMode = "open" | "token" | "unavailable" | "demo";
 
 export type SessionView = {
   admin: AdminMode;
