@@ -243,14 +243,28 @@ describe("the public demo", () => {
     expect((await breakIt()).status).toBe(202);
   });
 
-  /** A stranger who needed a token would see nothing, which is the one thing this deployment is for. */
-  it("opens the board and the audit trail without a token", async () => {
+  /**
+   * The phase's whole claim, in one test. A stranger with no token, on a deployment that has one,
+   * can read the board, break the demo service, and watch what happens next.
+   */
+  it("lets a stranger read it and break the demo service", async () => {
     vars["ADMIN_TOKEN"] = ADMIN_TOKEN;
     expect((await api("/api/audit/board")).status).toBe(200);
     expect((await api("/api/audit/incidents")).status).toBe(200);
     expect((await api("/api/demo")).status).toBe(200);
     expect((await bodyOf<SessionView>(await api("/api/session"))).admin).toBe(
       "demo",
+    );
+
+    const opened = await breakIt();
+    expect(opened.status).toBe(202);
+    const incident = (await bodyOf<{ incident: string }>(opened)).incident;
+
+    await finishTheCall(incident);
+    const view = await demo();
+    expect(view.health).toBe("serving");
+    expect((await new Repo(env.DB).getIncident(incident))?.state).toBe(
+      "resolved",
     );
   });
 
