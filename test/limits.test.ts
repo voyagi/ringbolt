@@ -135,13 +135,17 @@ async function burnAllowance(sender: string): Promise<void> {
 }
 
 describe("the intake endpoint under a flood", () => {
+  // Put back rather than blanked. The suite pins an intake token of its own in `vitest.config.ts`,
+  // and a test that leaves this empty hands every later test a build that accepts any token at all.
+  const pinned = env.INTAKE_TOKEN;
+
   beforeEach(async () => {
     await resetTables(env.DB);
     env.INTAKE_TOKEN = INTAKE_TOKEN;
   });
 
   afterEach(() => {
-    env.INTAKE_TOKEN = "";
+    env.INTAKE_TOKEN = pinned;
   });
 
   it("takes an alert while the sender is inside its allowance", async () => {
