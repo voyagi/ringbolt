@@ -52,6 +52,16 @@ import {
   toView,
 } from "./board.js";
 import { incidentStub } from "./incident-client.js";
+import {
+  ADMIN_FAILURES,
+  INTAKE_ALL,
+  INTAKE_OVERALL,
+  INTAKE_PER_SENDER,
+  adminBucket,
+  countAgainst,
+  intakeBucket,
+  senderOf,
+} from "./limits.js";
 import { reconcile } from "./reconcile.js";
 import { enforceRetention } from "./retention.js";
 import { buildPlacer, newId, waitUntilScheduler } from "./wiring.js";
@@ -160,6 +170,12 @@ app.post("/intake/:token", async (c) => {
     return c.json({ error: "unknown intake token" }, 404);
   }
 
+  // Deliberately after the token check rather than before it. The limiter's own bookkeeping is a
+  // database write, so counting an anonymous caller who has not named a real token would turn the
+  // thing that protects this endpoint into the cheapest way to make it write.
+  const flooding = await tooManyAlerts(c);
+  if (flooding !== null) return flooding;
+
   const parsed = alertPayload.safeParse(await readJson(c.req.raw));
   if (!parsed.success) {
     return c.json(
@@ -177,6 +193,49 @@ app.post("/intake/:token", async (c) => {
     await incidentStub(c.env, fingerprintFor(alert)).open(alert),
   );
 });
+
+/**
+ * Whether this alert is one too many, and the refusal to send back if it is.
+ *
+ * Two allowances rather than one. The per-sender limit catches the monitor that has started
+ * looping, which is the ordinary failure; the overall limit is what remains when the same token is
+ * used from many addresses, and it matters because every alert that gets through this endpoint can
+ * ring a telephone.
+ *
+ * A refusal here is a 429 with a Retry-After, which is what a monitor knows how to read, and it
+ * leaves no incident behind: a sender backing off and trying again gets a fresh judgement rather
+ * than being answered as a duplicate of something that was never opened.
+ */
+async function tooManyAlerts(
+  c: Context<{ Bindings: Bindings }>,
+): Promise<Response | null> {
+  const repo = new Repo(c.env.DB);
+  const now = new Date();
+  const sender = senderOf(c.req.raw.headers);
+
+  const perSender = await countAgainst(
+    repo,
+    intakeBucket(sender),
+    INTAKE_PER_SENDER,
+    now,
+  );
+  const overall = await countAgainst(repo, INTAKE_ALL, INTAKE_OVERALL, now);
+  if (perSender.allowed && overall.allowed) return null;
+
+  const retryAfter = Math.max(
+    perSender.allowed ? 0 : perSender.retryAfterSeconds,
+    overall.allowed ? 0 : overall.retryAfterSeconds,
+  );
+  return c.json(
+    {
+      error:
+        "too many alerts too quickly, so this one was not opened. Every alert that gets through here can ring a telephone.",
+      retryAfterSeconds: retryAfter,
+    },
+    429,
+    { "retry-after": String(retryAfter) },
+  );
+}
 
 /**
  * How an accepted alert is answered, whichever door it arrived through: the intake endpoint a
@@ -303,7 +362,7 @@ const adminOnly: MiddlewareHandler<{ Bindings: Bindings }> = async (
   next,
 ) => {
   const config = readConfig(c.env);
-  const refusal = adminRefusal(c, config);
+  const refusal = await adminRefusal(c, config);
   if (refusal !== null) return refusal;
   await next();
   return undefined;
@@ -785,11 +844,19 @@ function adminMode(config: RingboltConfig): AdminMode {
   return config.RINGBOLT_ENV === "development" ? "open" : "unavailable";
 }
 
-/** Null when the caller may go on, and the refusal to send back when they may not. */
-function adminRefusal(
+/**
+ * Null when the caller may go on, and the refusal to send back when they may not.
+ *
+ * A correct token costs nothing beyond the comparison: the rate limit is counted only when the
+ * token is wrong, so the dashboard polling every two seconds never touches it. That is also why the
+ * limit is on failures rather than on requests. It is not what makes the token safe, a secret of
+ * this length compared in constant time is not going to be guessed, but it stops a spray from being
+ * free and silent.
+ */
+async function adminRefusal(
   c: Context<{ Bindings: Bindings }>,
   config: RingboltConfig,
-): Response | null {
+): Promise<Response | null> {
   // A public demo has already refused every write except its own controls, and it cannot be in live
   // mode at all, so a token here would be guarding nothing that is still reachable. What it would do
   // is make the demo unreadable, which is the one thing that deployment exists for.
@@ -809,9 +876,24 @@ function adminRefusal(
 
   const header = c.req.header("authorization") ?? "";
   const presented = header.startsWith("Bearer ") ? header.slice(7) : "";
-  if (!timingSafeEqual(presented, expected))
-    return c.json({ error: "not authorized" }, 401);
-  return null;
+  if (timingSafeEqual(presented, expected)) return null;
+
+  const attempts = await countAgainst(
+    new Repo(c.env.DB),
+    adminBucket(senderOf(c.req.raw.headers)),
+    ADMIN_FAILURES,
+    new Date(),
+  );
+  if (attempts.allowed) return c.json({ error: "not authorized" }, 401);
+
+  return c.json(
+    {
+      error: "too many attempts with a token this deployment does not accept",
+      retryAfterSeconds: attempts.retryAfterSeconds,
+    },
+    429,
+    { "retry-after": String(attempts.retryAfterSeconds) },
+  );
 }
 
 /**

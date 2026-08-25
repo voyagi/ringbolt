@@ -10,6 +10,7 @@ const TABLES = [
   "action_runs",
   "call_records",
   "processed_events",
+  "rate_windows",
   "call_ledger",
   "rotation",
   "contacts",

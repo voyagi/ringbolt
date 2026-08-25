@@ -820,6 +820,38 @@ export class Repo {
       .run();
   }
 
+  /**
+   * Counts one request against a bucket's current window and returns the running total, including
+   * this one.
+   *
+   * One statement, so two requests arriving together cannot both read the same total and both
+   * decide they are the one under the limit. A read followed by a write would let a burst through
+   * exactly when a burst is the thing being refused.
+   */
+  async countAgainstWindow(
+    bucket: string,
+    windowStart: string,
+  ): Promise<number> {
+    const row = await this.db
+      .prepare(
+        `INSERT INTO rate_windows (bucket, window_start, hits) VALUES (?1, ?2, 1)
+         ON CONFLICT (bucket, window_start) DO UPDATE SET hits = rate_windows.hits + 1
+         RETURNING hits`,
+      )
+      .bind(bucket, windowStart)
+      .first<{ hits: number }>();
+    return row?.hits ?? 0;
+  }
+
+  /** Nothing else removes these, and an endpoint anybody can reach writes to them. */
+  async pruneRateWindows(startedBefore: string): Promise<number> {
+    const result = await this.db
+      .prepare(`DELETE FROM rate_windows WHERE window_start < ?1`)
+      .bind(startedBefore)
+      .run();
+    return result.meta.changes ?? 0;
+  }
+
   /** Nothing else removes rows from this table, and an unauthenticated endpoint writes to it. */
   async pruneProcessedEvents(receivedBefore: string): Promise<number> {
     const result = await this.db
