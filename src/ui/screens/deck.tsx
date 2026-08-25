@@ -272,10 +272,7 @@ function Readout({ focus }: { focus: DeckFocus }): ReactNode {
     <>
       <h2 className="label">THE CALL</h2>
       {call === null ? (
-        <p className="heard">
-          The line is open. Nothing comes back until the call ends, because a
-          call that is still running carries no decision.
-        </p>
+        <p className="heard">{nothingYet(focus.incident)}</p>
       ) : (
         <>
           <TalkTrack transcript={call.transcript} grant={grant} />
@@ -302,6 +299,24 @@ function Readout({ focus }: { focus: DeckFocus }): ReactNode {
       <Ledger events={focus.events} />
     </>
   );
+}
+
+/**
+ * Why the centre column is empty, which is not always a call in progress.
+ *
+ * The focused incident is the most urgent thing open, and the most urgent thing open is often not
+ * on the phone at all: one held for quiet hours, or one suppressed because the same problem already
+ * rang somebody. Telling a reader the line is open on one of those is a sentence about a call that
+ * is not happening.
+ */
+export function nothingYet(incident: IncidentView): string {
+  if (incident.state === "calling") {
+    return "The line is open. Nothing comes back until the call ends, because a call that is still running carries no decision.";
+  }
+  if (incident.wakeReason !== null) {
+    return "Nobody has been telephoned about this yet. It is waiting, and the ring on the left is counting down to the moment it stops waiting.";
+  }
+  return "Nobody has been telephoned about this yet.";
 }
 
 /**

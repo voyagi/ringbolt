@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TranscriptTurnView } from "../src/domain/view.js";
+import type { IncidentView, TranscriptTurnView } from "../src/domain/view.js";
 import {
   grantingTurn,
   runsByCall,
@@ -7,6 +7,7 @@ import {
   turnSpans,
 } from "../src/ui/parts/call.js";
 import { parseRoute } from "../src/ui/router.js";
+import { nothingYet } from "../src/ui/screens/deck.js";
 
 /**
  * The parts of the dashboard that DECIDE something, as opposed to the parts that draw. Rendering is
@@ -175,6 +176,48 @@ describe("laying the talk track out at real offsets", () => {
   });
 });
 
+describe("why the centre of the deck is empty", () => {
+  const focused = (
+    state: IncidentView["state"],
+    wakeReason: IncidentView["wakeReason"] = null,
+  ): IncidentView => ({
+    id: "inc_1",
+    state,
+    service: "dockside",
+    title: "Payment errors above 20 percent",
+    severity: "critical",
+    detail: null,
+    source: null,
+    startedAt: null,
+    links: [],
+    offeredActions: [],
+    wakeAt: null,
+    wakeReason,
+    callAttempts: 0,
+    rotationPosition: 0,
+    callStartedAt: null,
+    createdAt: "2026-08-24T14:00:00.000Z",
+    updatedAt: "2026-08-24T14:00:00.000Z",
+    outcome: null,
+    contactName: null,
+  });
+
+  /**
+   * The focused incident is the most urgent thing open, and the most urgent thing open is often not
+   * on the telephone at all. Saying the line is open on one that was never called is a sentence
+   * about a call that is not happening, which is the class of false claim this product cannot make.
+   */
+  it("only says the line is open when it is", () => {
+    expect(nothingYet(focused("calling"))).toContain("The line is open");
+    expect(nothingYet(focused("deferred", "quiet_hours_over"))).toContain(
+      "waiting",
+    );
+    expect(nothingYet(focused("received"))).toBe(
+      "Nobody has been telephoned about this yet.",
+    );
+  });
+});
+
 describe("reading the address bar", () => {
   it("knows every screen", () => {
     expect(parseRoute("/")).toEqual({ name: "deck" });
@@ -185,6 +228,7 @@ describe("reading the address bar", () => {
     });
     expect(parseRoute("/runbooks")).toEqual({ name: "runbooks" });
     expect(parseRoute("/rota")).toEqual({ name: "rota" });
+    expect(parseRoute("/demo")).toEqual({ name: "demo" });
     expect(parseRoute("/settings")).toEqual({ name: "settings" });
   });
 

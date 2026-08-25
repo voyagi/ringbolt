@@ -65,6 +65,12 @@ const SHOTS = [
     size: DESKTOP,
   },
   {
+    name: 'demo',
+    clicks: ['nav a[href="/demo"]'],
+    settled: 'p.demo-state',
+    size: DESKTOP,
+  },
+  {
     name: 'settings',
     clicks: ['nav a[href="/settings"]'],
     settled: 'pre.raw',

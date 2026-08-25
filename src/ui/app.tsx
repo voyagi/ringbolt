@@ -6,6 +6,7 @@ import { Nothing, Waiting, Wrong } from "./parts/states.js";
 import { usePoll } from "./poll.js";
 import { type Route, useRoute } from "./router.js";
 import { Deck } from "./screens/deck.js";
+import { Demo } from "./screens/demo.js";
 import { Incident } from "./screens/incident.js";
 import { Incidents } from "./screens/incidents.js";
 import { Rota } from "./screens/rota.js";
@@ -18,6 +19,7 @@ const PAGES = [
   { path: "/incidents", label: "Incidents", name: "incidents" },
   { path: "/runbooks", label: "Runbooks", name: "runbooks" },
   { path: "/rota", label: "Rota", name: "rota" },
+  { path: "/demo", label: "Demo", name: "demo" },
   { path: "/settings", label: "Settings", name: "settings" },
 ] as const;
 
@@ -49,7 +51,7 @@ export function App(): ReactNode {
       <a className="skip" href="#screen">
         Skip to the board
       </a>
-      <Rail route={route} go={go} calleMode={session.value.calleMode} />
+      <Rail route={route} go={go} session={session.value} />
       <Screen route={route} go={go} session={session.value} signOut={signOut} />
     </div>
   );
@@ -58,11 +60,11 @@ export function App(): ReactNode {
 function Rail({
   route,
   go,
-  calleMode,
+  session,
 }: {
   route: Route;
   go: (path: string) => void;
-  calleMode: "fake" | "live";
+  session: SessionView;
 }): ReactNode {
   const [theme, flip] = useTheme();
 
@@ -95,10 +97,21 @@ function Rail({
         ))}
       </nav>
       <div className="trailing">
-        {calleMode === "fake" && (
-          <span className="label" title="No call can reach a telephone">
-            STAND-IN
+        {/* One badge, not two. On the public demo the stand-in is implied: that
+            deployment refuses to start in live mode at all. */}
+        {session.admin === "demo" ? (
+          <span
+            className="label"
+            title="Read only, and no call can reach a telephone"
+          >
+            PUBLIC DEMO
           </span>
+        ) : (
+          session.calleMode === "fake" && (
+            <span className="label" title="No call can reach a telephone">
+              STAND-IN
+            </span>
+          )
         )}
         <button
           type="button"
@@ -138,6 +151,7 @@ function Screen({
       {route.name === "incident" && <Incident id={route.id} />}
       {route.name === "runbooks" && <Runbooks />}
       {route.name === "rota" && <Rota />}
+      {route.name === "demo" && <Demo go={go} />}
       {route.name === "settings" && (
         <Settings session={session} onSignOut={signOut} />
       )}

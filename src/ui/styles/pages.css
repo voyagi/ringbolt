@@ -89,8 +89,17 @@
   align-items: start;
 }
 
+/* Even halves, for a page whose two sides are both prose to read rather than a
+   record to scan beside its evidence. */
+.detail.even {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+/* Both selectors, because .detail.even is the more specific one and would
+   otherwise keep two columns on a telephone. */
 @media (max-width: 66rem) {
-  .detail {
+  .detail,
+  .detail.even {
     grid-template-columns: 1fr;
   }
 }
@@ -211,4 +220,25 @@
   color: var(--green);
   font-size: var(--step-small);
   font-weight: 600;
+}
+
+/* The demo service's own readout. It is the one number on this screen that
+   changes while nobody is touching the page, so it is set at reading size in
+   the state's colour rather than as another row in a list. */
+.demo-state {
+  margin: 0 0 0.5rem;
+  font-size: var(--step-title);
+  letter-spacing: -0.01em;
+}
+
+.demo-state b {
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+}
+
+.plain {
+  margin: 0;
+  padding-left: 1.125rem;
+  display: grid;
+  gap: 0.5rem;
 }

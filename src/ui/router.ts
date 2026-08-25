@@ -14,6 +14,7 @@ export type Route =
   | { name: "incident"; id: string }
   | { name: "runbooks" }
   | { name: "rota" }
+  | { name: "demo" }
   | { name: "settings" }
   | { name: "missing"; path: string };
 
@@ -30,6 +31,7 @@ export function parseRoute(path: string): Route {
   if (parts.length === 1) {
     if (head === "runbooks") return { name: "runbooks" };
     if (head === "rota") return { name: "rota" };
+    if (head === "demo") return { name: "demo" };
     if (head === "settings") return { name: "settings" };
   }
   return { name: "missing", path };

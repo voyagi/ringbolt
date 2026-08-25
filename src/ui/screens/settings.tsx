@@ -1,8 +1,15 @@
 import type { ReactNode } from "react";
-import type { BudgetView, SessionView } from "../../domain/view.js";
+import type { AdminMode, BudgetView, SessionView } from "../../domain/view.js";
 import { get, rememberToken } from "../api.js";
 import { Waiting, Wrong } from "../parts/states.js";
 import { usePoll } from "../poll.js";
+
+const ADMINISTRATION: Record<AdminMode, string> = {
+  open: "open, because this is a development build talking to itself",
+  token: "a token is required",
+  unavailable: "refused, because this deployment has no administrator token",
+  demo: "open and read only, because this deployment is the public demo",
+};
 
 /**
  * The connection, what it has cost, and how to send Ringbolt an alert.
@@ -49,12 +56,16 @@ export function Settings({
             <dt>Environment</dt>
             <dd>{session.environment}</dd>
             <dt>Administration</dt>
-            <dd>
-              {session.admin === "open"
-                ? "open, because this is a development build talking to itself"
-                : "a token is required"}
-            </dd>
+            <dd>{ADMINISTRATION[session.admin]}</dd>
           </dl>
+          {session.admin === "demo" && (
+            <p className="note">
+              A public demo publishes everything it holds except telephone
+              numbers, so it must not share a database with a real deployment.
+              Configuration cannot be changed here at all: every write is
+              refused apart from the two controls on the demo screen.
+            </p>
+          )}
           {session.admin === "token" && (
             <p style={{ marginTop: "1rem" }}>
               <button
