@@ -101,6 +101,14 @@ decision it extracted. So the floor filters calls that went badly, and it does n
 sure the transcription is about the word the responder actually said. The schema check, the
 offered-action check and the spoken confirmation phrase are what guard the decision itself.
 
+And a second limit on the last of those, found by planting a fault rather than by reading the code.
+The confirmation phrase is checked against the field CALL-E extracted, not against the transcript,
+so an action can run on a phrase that appears nowhere in what the responder is recorded as saying.
+The deck already holds the stricter rule: it marks a sentence as the authorization only when that
+sentence really contains the words. Making the gate ask the same question is the next thing on this
+path, and until it does, the claim here is that the provider reported the phrase rather than that
+the recording contains it.
+
 ## What Ringbolt is allowed to do
 
 An action is a row, not a function. It carries what it is called, the sentence the caller reads out
@@ -203,8 +211,9 @@ centre column is the call, and the sentence that granted permission is joined by
 action it allowed, so the two cannot be read as separate events. The right column is everything not
 on the phone, and the rota, so "who gets called next" is always answered on screen.
 
-Four more screens: the history of every incident, one incident in full with its transcript and the
-system state either side of every action, the runbook and the per-service policy, and the rota.
+Five more screens: the history of every incident, one incident in full with its transcript and the
+system state either side of every action, the runbook and the per-service policy, the rota, and the
+demo service with the control that breaks it.
 
 Three things about it are worth stating because they are decisions rather than defaults.
 
@@ -265,6 +274,44 @@ A live build also dials only numbers named in `LIVE_CALL_ALLOWLIST`, plus `DEMO_
 always on the list. A rotation can name any contact anybody has added, so without that the set of
 telephones a deployment can reach would be a database table rather than something an operator wrote
 down.
+
+## The demo
+
+There is one service in the estate that belongs to Ringbolt: `dockside`, a checkout that can be
+broken on purpose. Its health is read from the same table a runbook action writes, so breaking it is
+a row, fixing it is a row, and the thing that fixes it is the ordinary `rollback` action a responder
+authorizes on a call rather than a shortcut written for the demo.
+
+Press the button on `/demo` and the product runs: a bad release goes out, the demo service's own
+watch posts an alert, policy decides it is worth a call, the call is placed to whoever is on the
+rota, the responder asks what else is affected and then says the words the rollback demanded, and
+the release is put back. The deck draws a line from that sentence into the action it allowed. Half a
+minute later the demo screen reads SERVING again, without anybody reloading it.
+
+It refuses the things it should. Breaking what is already broken is refused rather than opening a
+second incident, four presses are one telephone call because repeats collapse the way any monitor's
+repeats do, and the service cannot be put back by hand while a call about it is in flight, because
+that would leave the record claiming a rollback for a service somebody had already quietly fixed.
+
+**A deployment with `DEMO_MODE` set is public and read only**, and it is the worker that enforces
+that rather than a screen declining to draw a button:
+
+- It cannot be in live mode. The two together are a configuration error and the deployment refuses
+  to serve at all, so no stranger can cause a telephone to ring.
+- Every write is refused except the demo controls, the intake endpoint, which still carries its own
+  token, and the CALL-E webhook, which is verified against the provider before it is believed.
+- No runbook action is allowed any host at all, so the only thing an action can change is state
+  Ringbolt owns.
+- Telephone numbers are withheld from every read. Names stay: a name is who authorized a production
+  change, and that is the record. So a demo must be its own deployment with its own database, and
+  `docs/deploying.md` says so in those words.
+
+A demo deployment is seeded with six incidents so nobody meets the product as an empty screen: a
+call that ended in a rollback, a call the responder held, an alert the policy refused to ring
+anybody about, one that ran out of people to escalate to, and two still open. One of them is the
+call nobody was heard on, carrying a schema-valid instruction to change production at high
+confidence, refused. That is the most important thing in the seeded history and it is why it is
+there.
 
 ## What the person on the phone is told
 
@@ -343,6 +390,13 @@ Two of those planted faults changed nothing, which was worth more than the ones 
 guards were being covered by a different rule rather than by a test of their own, and both now have
 one.
 
+The demo added twelve, all red: breaking what is already broken opening a second incident, the
+repair control pulling the floor out from under a call in flight, the read-only guard letting a
+write through, a public demo asking for the administrator token anyway, telephone numbers published
+on one, a demo wired to a real telephone, a runbook action allowed its allowlist, an unreadable
+switch value reading as off, seeding the example history twice, and three on the conversation the
+stand-in rehearses.
+
 The dashboard added seven more, all of which reddened the right test: the board route leaving the
 administrator guard, a set token no longer meaning a token is wanted, the deck focusing the least
 severe thing on the phone instead of the worst, the arrival trace dropping its empty buckets so a
@@ -357,6 +411,7 @@ rule that would still report clean.
 | ------------- | ------------------------------------------------------------------------------------------ |
 | `src/domain`  | The incident state machine, the decision contract, and the orchestrator. No platform code. |
 | `src/calle`   | The telephone port, the CALL-E adapter, the local stand-in, and the verification step.     |
+| `src/demo`    | The one service Ringbolt owns and can break, and the example estate a demo is seeded with. |
 | `src/actions` | What an action definition may say, and the two engines that carry one out.                 |
 | `src/db`      | The D1 schema access layer.                                                                |
 | `src/worker`  | Routing, configuration, the incident Durable Object, and the deck's one read.              |
@@ -382,10 +437,12 @@ refuse to act on such a call, which is tested; the cause is still open, and
 `docs/two-way-audio.md` says exactly how far the evidence goes and what the next live call would
 settle.
 
+The demo runs too: a stranger can open a `DEMO_MODE` deployment, break the demo service, and watch
+the whole loop from the alert to the rollback, with no way to make a telephone ring and no write
+that reaches anything else.
+
 Not built yet, and not pretended to be:
 
-- The public demo mode and the deliberately breakable demo service, so the loop can be shown to a
-  stranger without a way to trigger a real telephone call.
 - Authentication and per-tenant isolation. Everything the dashboard reads and writes is behind one
   shared administrator token, `/api/incidents` is open, and there is no retention window that
   deletes a transcript on a schedule. All three are stated here rather than left for somebody to
