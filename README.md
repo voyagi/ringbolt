@@ -320,6 +320,41 @@ call nobody was heard on, carrying a schema-valid instruction to change producti
 confidence, refused. That is the most important thing in the seeded history and it is why it is
 there.
 
+## What the intake endpoint will take
+
+It is the one door anybody on the internet can knock on, and everything that gets through it can
+ring a telephone, so it is the one place where being generous is expensive.
+
+**A token in the path, compared in constant time.** At least sixteen characters, required outside
+development, and a wrong one is a 404 rather than a 401: an endpoint that says "close, but no" is an
+endpoint that will be guessed at.
+
+**Two allowances, both per minute.** Sixty alerts from one sender, three hundred across the whole
+deployment. The first catches the monitor that has started looping, which is the ordinary failure.
+The second is what remains when the same token is used from many addresses, and it matters because
+the per-sender limit is no defence against that at all. Over either one, the answer is a 429 with a
+`Retry-After` that says when to come back, which is what a monitor knows how to read.
+
+**A refused alert leaves nothing behind.** No incident is opened, so a sender that backs off and
+tries again gets a fresh judgement rather than being answered as a duplicate of something that was
+never opened.
+
+**The counting happens after the token check, deliberately.** The limiter's own bookkeeping is a
+database write, so counting a caller who has not named a real token would make the thing that
+protects this endpoint the cheapest way to make it write.
+
+The same counter answers a spray at the administrator token: ten wrong tokens from one address in
+five minutes and the answer becomes a 429. That is not what makes the token safe, a secret of that
+length compared in constant time is not going to be guessed, and it would not stop somebody who
+changes address. It stops a spray from being free and silent, and it costs nothing on the path that
+matters, because a correct token never touches the counter at all. That is why the limit is on
+failures rather than on requests: the dashboard polls every two seconds, and a limit on requests
+would lock out the person doing everything right.
+
+Neither limit is configurable, for the same reason the three-calls-in-ten-minutes ceiling is not: a
+number that can be raised under pressure is a number that will be raised at three in the morning by
+whoever is being woken up by it.
+
 ## What is kept, and for how long
 
 Ringbolt holds three things about a person: their name and number in the rota, the transcript of
@@ -450,6 +485,10 @@ The rule that a confirmation has to appear in the transcript was planted twice a
 check out, and letting a turn Ringbolt itself spoke count as the responder saying it back. The first
 reddened three tests across the example suite and the property suite, the second reddened those and
 the deck's own test that it never marks a turn Ringbolt spoke.
+
+The rate limits added three: counting an anonymous caller before the token was checked, counting an
+administrator request that carried the RIGHT token, and putting every sender in one bucket so one
+address could lock out another. Each reddened the test written for it.
 
 The demo added thirteen, all red: breaking what is already broken opening a second incident, the
 repair control pulling the floor out from under a call in flight, the read-only guard letting a

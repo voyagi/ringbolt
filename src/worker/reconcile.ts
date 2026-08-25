@@ -3,6 +3,7 @@ import type { Incident } from "../domain/incident.js";
 import type { StallReason } from "../domain/orchestrator.js";
 import type { Bindings } from "./env.js";
 import { type IncidentActor, incidentStub } from "./incident-client.js";
+import { WINDOW_RETENTION_MS } from "./limits.js";
 
 /**
  * How long an incident may sit in a state where something is supposed to be happening to it before
@@ -86,6 +87,7 @@ export async function reconcile(
     result.prunedEvents = await repo.pruneProcessedEvents(
       isoBefore(now, EVENT_RETENTION_MS),
     );
+    await repo.pruneRateWindows(isoBefore(now, WINDOW_RETENTION_MS));
   } catch {
     result.failed += 1;
   }
