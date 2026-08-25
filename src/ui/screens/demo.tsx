@@ -3,6 +3,7 @@ import {
   type DemoControl,
   type DemoHealth,
   type DemoView,
+  type SessionView,
   labelForState,
   sinceWords,
   toneForState,
@@ -33,7 +34,13 @@ const WORD: Record<DemoHealth, string> = {
  * back without touching anything: break it here, and a minute later the release has been rolled
  * back by an action somebody authorized on a call.
  */
-export function Demo({ go }: { go: (path: string) => void }): ReactNode {
+export function Demo({
+  go,
+  session,
+}: {
+  go: (path: string) => void;
+  session: SessionView;
+}): ReactNode {
   const demo = usePoll<DemoView>(
     () => get<DemoView>("/api/demo"),
     BOARD_INTERVAL_MS,
@@ -69,6 +76,7 @@ export function Demo({ go }: { go: (path: string) => void }): ReactNode {
 
           <section className="card">
             <h2>BREAK IT</h2>
+            {session.calleMode === "live" && <Wired />}
             <Controls view={view} onChanged={demo.again} />
           </section>
         </div>
@@ -236,6 +244,19 @@ function Working({
         </button>
       </div>
     </>
+  );
+}
+
+/**
+ * On a deployment wired to a telephone, this control is not a demonstration. It is a real call to
+ * whoever is at the top of the rota, and it is billed whether or not they answer.
+ */
+function Wired(): ReactNode {
+  return (
+    <p className="tone-live" role="status" style={{ margin: "0 0 0.75rem" }}>
+      This deployment is wired to a real telephone. Breaking the demo service
+      here rings whoever is on the rota and costs five cents.
+    </p>
   );
 }
 

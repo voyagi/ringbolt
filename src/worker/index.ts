@@ -349,8 +349,26 @@ app.post("/api/demo/repair", async (c) => {
   return c.json({ state: repaired.state });
 });
 
-/** The example estate, written once. A second call finds it already there and writes nothing. */
+/**
+ * The example estate, written once. A second call finds it already there and writes nothing.
+ *
+ * It is refused on a real deployment, and that is not tidiness. The estate carries two fictional
+ * contacts and puts them in the shared rota when there is no rota yet, so seeding an install that
+ * somebody is actually on call for would quietly make Ringbolt telephone a number that cannot be
+ * reached. A demo and a laptop are the two places where that is what you asked for.
+ */
 app.post("/api/demo/seed", async (c) => {
+  const config = readConfig(c.env);
+  if (!config.DEMO_MODE && config.RINGBOLT_ENV !== "development") {
+    return c.json(
+      {
+        error:
+          "the example history writes contacts and a calling order, so it is refused outside development unless DEMO_MODE is on",
+      },
+      409,
+    );
+  }
+
   const result = await seedDemoHistory(new Repo(c.env.DB), new Date());
   return c.json(result, result.seeded ? 201 : 200);
 });

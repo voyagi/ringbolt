@@ -151,7 +151,7 @@ function Screen({
       {route.name === "incident" && <Incident id={route.id} />}
       {route.name === "runbooks" && <Runbooks />}
       {route.name === "rota" && <Rota />}
-      {route.name === "demo" && <Demo go={go} />}
+      {route.name === "demo" && <Demo go={go} session={session} />}
       {route.name === "settings" && (
         <Settings session={session} onSignOut={signOut} />
       )}

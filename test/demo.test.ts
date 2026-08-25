@@ -28,6 +28,10 @@ async function bodyOf<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+function authorized(): Record<string, string> {
+  return { authorization: `Bearer ${ADMIN_TOKEN}` };
+}
+
 async function demo(): Promise<DemoView> {
   return bodyOf<DemoView>(await api("/api/demo"));
 }
@@ -340,6 +344,8 @@ describe("the example history", () => {
 
   afterEach(() => {
     delete vars["DEMO_MODE"];
+    delete vars["ADMIN_TOKEN"];
+    vars["RINGBOLT_ENV"] = "development";
   });
 
   /**
@@ -394,6 +400,27 @@ describe("the example history", () => {
 
     const runs = await repo.listActionRuns("inc_demo_past_rollback");
     expect(runs[0]?.authorizedBy).toBe("Ivo Haring");
+  });
+
+  /**
+   * The estate carries two fictional contacts and puts them in the shared rota when there is no
+   * rota yet. On an install somebody is actually on call for, that would quietly point Ringbolt at
+   * a number no network can route, which is the worst thing an example history could do.
+   */
+  it("is refused on a deployment somebody might be on call for", async () => {
+    vars["RINGBOLT_ENV"] = "production";
+    vars["ADMIN_TOKEN"] = ADMIN_TOKEN;
+    const seed = { method: "POST", headers: authorized() };
+
+    const refused = await api("/api/demo/seed", seed);
+    expect(refused.status).toBe(409);
+    expect((await bodyOf<{ error: string }>(refused)).error).toContain(
+      "contacts",
+    );
+    expect((await new Repo(env.DB).listContacts()).length).toBe(0);
+
+    vars["DEMO_MODE"] = "true";
+    expect((await api("/api/demo/seed", seed)).status).toBe(201);
   });
 
   /** Two of them are still open, so the board a visitor meets is a board with something on it. */

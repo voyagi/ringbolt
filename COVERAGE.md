@@ -108,13 +108,14 @@ The accessibility gate is held to the same standard by `npm run a11y:prove`, whi
 defects back into the built output one at a time and expects the gate to name each one. All five are
 defects this dashboard actually had on its first audit.
 
-The demo added twelve, all red: breaking what is already broken opening a second incident, the
+The demo added thirteen, all red: breaking what is already broken opening a second incident, the
 repair control pulling the floor out from under a call in flight, the read-only guard letting a
 write through, a public demo asking for the token anyway, telephone numbers published, a demo wired
 to a real telephone, a runbook action allowed its allowlist, an unreadable switch value reading as
-off, seeding twice, and three on the rehearsed conversation.
+off, the example history seeded into a rota somebody is on call for, seeding twice, and three on
+the rehearsed conversation.
 
-**One of those twelve is why there is a finding written into the roadmap.** Making the rehearsed
+**One of those thirteen is why there is a finding written into the roadmap.** Making the rehearsed
 responder say "Go ahead." while the decision still carries "roll it back" does not stop the action:
 the authorization gate reads the confirmation phrase off the provider's extracted result and never
 asks whether the transcript contains it. The loop still resolves, and only the transcript-evidence
