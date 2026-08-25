@@ -8,5 +8,11 @@
     "name": "dashboard stylesheet",
     "path": "dist/client/assets/*.css",
     "limit": "6 kB"
+  },
+  {
+    "name": "typefaces a first visit downloads",
+    "path": "dist/client/assets/*.woff2",
+    "limit": "72 kB",
+    "brotli": false
   }
 ]

@@ -260,6 +260,12 @@ the gate to name each one.
 Screenshots of every screen in both themes are in `design/mockups/`, regenerated from the built
 bundle by `node scripts/render-screens.mjs`.
 
+The size budget covers what a first visit actually downloads, which means the typefaces as well as
+the code: five self-hosted WOFF2 files, no font CDN, and a ceiling with only a few kilobytes of
+headroom so that adding a sixth weight fails the build rather than quietly costing every visitor
+another download. There is no analytics, no error reporting service and no third party in the
+browser at all.
+
 To place real calls, set `CALLE_MODE=live` with a `CALLE_API_KEY`, a `DEMO_PHONE` in E.164, and the
 `CALLE_LOCALE` and `CALLE_REGION` the call will be held in, for example `en-GB` and `NL`.
 Configuration is refused if any of them is missing, so `/health` tells you before an alert does.
@@ -464,7 +470,7 @@ request building all run, and only the network is missing.
 
 ```bash
 npm test            # the suite
-npm run gate        # types, complexity, duplication, boundaries, ship artifacts
+npm run gate        # types, complexity, duplication, boundaries, ship artifacts, size
 npm run verify:ship # everything, one command, with per-step exit codes
 ```
 
