@@ -3,6 +3,7 @@ import type {
   CallSnapshot,
   PlaceCallInput,
   Scheduler,
+  TranscriptTurn,
 } from "./port.js";
 
 /**
@@ -26,6 +27,13 @@ export type FakeScenario =
       decision: Record<string, unknown>;
       confidence?: number;
       afterMs?: number;
+      /**
+       * What the responder is heard saying, when the caller wants a particular conversation rather
+       * than the shortest one that reaches the gate. The demo is the case that needs it: the deck
+       * draws a line from the sentence that granted permission to the action it allowed, and it
+       * draws it only where the words the action actually required are present.
+       */
+      turns?: readonly TranscriptTurn[];
     }
   | { kind: "no_answer"; afterMs?: number }
   | { kind: "hangs_up"; afterMs?: number }
@@ -223,11 +231,13 @@ export class FakeCallPlacer implements CallPlacer {
           ...decided(scenario.confidence ?? 0.92, scenario.decision),
           transcript: [
             { offsetSeconds: 0, speaker: "bot", text: opening(input) },
-            {
-              offsetSeconds: 9,
-              speaker: "user",
-              text: "Understood. Go ahead.",
-            },
+            ...(scenario.turns ?? [
+              {
+                offsetSeconds: 9,
+                speaker: "user",
+                text: "Understood. Go ahead.",
+              },
+            ]),
           ],
         };
       case "no_answer":

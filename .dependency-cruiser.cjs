@@ -27,7 +27,7 @@ module.exports = {
       comment: 'The dashboard bundle must not import server-only modules: they carry the database, the telephone credential and the runbook secrets.',
       from: { path: '^src/ui' },
       to: {
-        path: '^src/(worker|db|calle|actions|domain)',
+        path: '^src/(worker|db|calle|actions|domain|demo)',
         pathNot: '^src/domain/view\\.ts$',
       },
     },

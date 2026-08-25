@@ -20,6 +20,17 @@ function blankIsAbsent<T extends z.ZodType>(schema: T) {
   return z.preprocess((value) => (value === "" ? undefined : value), schema);
 }
 
+/**
+ * A switch as a deployment writes one. Wrangler's own vars can carry a real boolean and a
+ * `.dev.vars` file can only carry text, so both are accepted and nothing else is. A typo is a
+ * configuration error the health check names rather than a switch that quietly reads as off, which
+ * matters here because the switch below is the one that makes a deployment public.
+ */
+const switchVar = z
+  .union([z.boolean(), z.enum(["true", "false"])])
+  .optional()
+  .transform((value) => value === true || value === "true");
+
 const shared = {
   RINGBOLT_ENV: z.enum(["development", "preview", "production"]),
   PUBLIC_BASE_URL: z.url(),
@@ -30,6 +41,16 @@ const shared = {
    * authentication proper is phase 7, and an unguarded write here is a stranger's phone ringing.
    */
   ADMIN_TOKEN: blankIsAbsent(z.string().min(16).optional()),
+  /**
+   * Makes this deployment the public demo: anybody may read it, nobody may write to it except
+   * through the demo controls, no runbook action may reach any host, and live calling is refused
+   * outright by readConfig below.
+   *
+   * It is a deployment switch rather than a screen or a database row on purpose. What it turns off
+   * is the administrator token on the way in, so a value somebody could change from inside the
+   * product would be a value that could open a real deployment to the internet.
+   */
+  DEMO_MODE: blankIsAbsent(switchVar),
   /**
    * How much this deployment may spend on real calls, in dollars. CALL-E bills per call task
    * created, at five cents, and a task that never connects is billed like any other.
@@ -166,6 +187,11 @@ function isCallableHost(value: string): boolean {
 export function allowedActionHosts(
   config: RingboltConfig,
 ): readonly string[] | null {
+  // The public demo may not reach anything at all, whatever its allowlist says. A stranger can
+  // trigger an action there, and an action definition is a row somebody may already have stored, so
+  // the guarantee has to be that no host is reachable rather than that no bad one is.
+  if (config.DEMO_MODE) return [];
+
   const configured = config.ACTION_HOST_ALLOWLIST;
   if (configured === undefined) {
     return config.RINGBOLT_ENV === "development" ? null : [];
@@ -223,13 +249,21 @@ export function readConfig(
   }
 
   const config = parsed.data;
-  if (
-    config.CALLE_MODE === "live" &&
-    !(options.liveAvailable ?? LIVE_MODE_AVAILABLE)
-  ) {
-    throw new ConfigurationError([
-      "CALLE_MODE is live but this build has live calling switched off. Set CALLE_MODE=fake.",
-    ]);
+  if (config.CALLE_MODE === "live") {
+    if (!(options.liveAvailable ?? LIVE_MODE_AVAILABLE)) {
+      throw new ConfigurationError([
+        "CALLE_MODE is live but this build has live calling switched off. Set CALLE_MODE=fake.",
+      ]);
+    }
+    // The whole promise of the public demo is that nothing a stranger presses can ring a telephone.
+    // Refusing the combination here, where every request reads its configuration, is what makes that
+    // a property of the deployment rather than a rule each route has to remember. It fails closed:
+    // a deployment configured this way serves nothing at all and says why.
+    if (config.DEMO_MODE) {
+      throw new ConfigurationError([
+        "DEMO_MODE is on and CALLE_MODE is live. A public demo may not be able to place a real call, so this deployment refuses to serve. Set CALLE_MODE=fake, or turn DEMO_MODE off.",
+      ]);
+    }
   }
 
   return config;
