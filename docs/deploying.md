@@ -8,8 +8,15 @@ lifecycle and its timers.
 
 ```bash
 wrangler login
-wrangler d1 create ringbolt
+wrangler d1 create ringbolt --location=weur
 ```
+
+**Choose the location deliberately.** Without the flag D1 puts the primary instance near wherever
+the create request came from, which is wherever you happened to be sitting. This database holds
+telephone numbers and transcripts of people talking, so an operator serving people in the EU wants
+`weur` or `eeur`. Cloudflare documents the hint as a hint rather than a guarantee, and the other
+values are `wnam`, `enam`, `apac` and `oc`. It cannot be changed afterwards without creating another
+database, which is why it is the first line of this file rather than a note further down.
 
 Copy the `database_id` that command prints into `wrangler.jsonc`, replacing the local development
 placeholder. Then apply the schema:
@@ -174,7 +181,7 @@ telephone numbers are withheld. Pointing one at a database that carries real inc
 those instead.
 
 ```bash
-wrangler d1 create ringbolt-demo          # its own database, never the real one
+wrangler d1 create ringbolt-demo --location=weur   # its own database, never the real one
 # point wrangler.jsonc at it, set DEMO_MODE to true, then
 npm run db:migrate:remote
 npm run deploy
