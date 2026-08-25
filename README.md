@@ -38,6 +38,9 @@ alert  ->  policy  ->  phone call  ->  spoken decision  ->  authorization  ->  a
    land in one record.
 7. Nobody picks up, and the next person in the rotation is called instead.
 
+`docs/architecture.md` draws that as two diagrams, the parts and one incident end to end, with the
+boundaries and what enforces each of them.
+
 A webhook that never arrives does not lose the decision. Every incident Ringbolt parks carries the
 time it is due to be looked at again, and its own Durable Object holds an alarm for that time: a
 call that nobody answers, a snooze the responder asked for, quiet hours that have ended. A sweep
@@ -207,6 +210,10 @@ action changes state you can read back:
 curl http://localhost:8787/api/incidents
 curl http://localhost:8787/api/services/checkout/state
 ```
+
+Those two are open on a laptop and behind `ADMIN_TOKEN` everywhere else, along with everything else
+that says anything about a production estate. Add
+`-H "authorization: Bearer $ADMIN_TOKEN"` once you have set one.
 
 Or watch it happen at <http://localhost:8787>, which is the point of the next section.
 
@@ -517,8 +524,8 @@ rule that would still report clean.
 | `src/worker`  | Routing, configuration, the incident Durable Object, and the deck's one read.              |
 | `src/ui`      | The dashboard. It may import `src/domain/view.ts` and nothing else under `src`.            |
 | `design`      | The art direction, and a screenshot of every screen in both themes.                        |
-| `docs/adr`    | Why the stack is what it is.                                                               |
-| `docs`        | Deploying it, the runbook for when it breaks, and the two open questions it has.           |
+| `docs/adr`    | Why the stack is what it is, and why one deployment is one tenant.                         |
+| `docs`        | How it fits together, deploying it, what it holds about people, and the runbook.           |
 
 ## Status
 
@@ -541,11 +548,23 @@ The demo runs too: a stranger can open a `DEMO_MODE` deployment, break the demo 
 the whole loop from the alert to the rollback, with no way to make a telephone ring and no write
 that reaches anything else.
 
+Everything that says anything about a production estate or a person is behind `ADMIN_TOKEN`, which
+is one shared token rather than accounts. That is a decision rather than an unfinished job, and
+`docs/adr/0002-tenancy.md` is where it is argued: one deployment is one tenant, there is no tenant
+column because there is no second tenant, and what would have to change to make it multi-tenant is
+written down so the size of it is visible. What it costs is written down too: a Ringbolt deployment
+cannot tell two of its own operators apart, and revoking one person means rotating the token.
+
+Two endpoints are open and neither publishes anything about anybody: `/health`, which says whether
+the configuration parses, and `/api/session`, which says whether a token is wanted and how long this
+deployment keeps what it holds.
+
 Not built yet, and not pretended to be:
 
-- Authentication and per-tenant isolation. Everything the dashboard reads and writes is behind one
-  shared administrator token, and `/api/incidents` is open. Both are stated here rather than left
-  for somebody to discover.
+- A subject access request has to be assembled by hand. Erasure is one request and works;
+  export is two audit reads and some copying. `docs/privacy.md` says exactly which.
+- The screens have no unit tests. What holds them is the live browser audit and tests on the parts
+  that decide something, which is a real choice with a real gap in it, and `COVERAGE.md` says so.
 
 ## Licence
 

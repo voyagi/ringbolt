@@ -210,6 +210,25 @@ describe("presenting the wrong administrator token", () => {
     });
   }
 
+  /**
+   * These two were open from the walking skeleton until 2026-08-25. What they publish is what is
+   * broken in somebody's estate right now, which is not a public fact about anybody's business.
+   *
+   * The bare path is asserted beside the one under it because a wildcard covering both is a
+   * property of the router rather than something obvious from reading it, and the same question on
+   * `/api/demo` cost a failing test to answer.
+   */
+  it("no longer publishes what is broken to a caller with no token", async () => {
+    for (const path of [
+      "/api/incidents",
+      "/api/incidents/inc_1",
+      "/api/services/checkout/state",
+    ]) {
+      const response = await SELF.fetch(`https://ringbolt.test${path}`);
+      expect(response.status, path).toBe(401);
+    }
+  });
+
   it("answers a spray with a refusal to keep trying", async () => {
     for (let n = 0; n < ADMIN_FAILURES.limit; n += 1) {
       expect((await attempt(`guess-${n}`)).status).toBe(401);

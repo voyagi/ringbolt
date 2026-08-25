@@ -325,6 +325,44 @@ app.post("/webhooks/calle", async (c) => {
   return c.json({ ok: true });
 });
 
+/**
+ * Everything that decides which telephone rings sits behind this, and so is everything that says
+ * anything about somebody's production estate. An unguarded write here is a stranger's phone going
+ * off at three in the morning, charged to the owner, and an unguarded read is a list of what is
+ * broken in their systems and who is being telephoned about it.
+ *
+ * The subtree is guarded in one place rather than route by route on purpose. A guard repeated at
+ * nine handlers is a guard that will eventually be missing from the tenth.
+ */
+const adminOnly: MiddlewareHandler<{ Bindings: Bindings }> = async (
+  c,
+  next,
+) => {
+  const config = readConfig(c.env);
+  const refusal = await adminRefusal(c, config);
+  if (refusal !== null) return refusal;
+  await next();
+  return undefined;
+};
+
+app.use("/api/config/*", adminOnly);
+
+// The audit trail carries the call transcript, which is personal data and is also the evidence
+// behind a production change. Neither belongs on the open read API.
+app.use("/api/audit/*", adminOnly);
+
+// These two were open until 2026-08-25, from the walking skeleton, when the whole product was a
+// curl and a page. What they publish is what is broken in somebody's estate right now, which
+// service, how bad, and how far Ringbolt has got with it, and that is not a public fact about
+// anybody's business. Development with no token set is still open, so the curls in the README go on
+// working on a laptop; every other environment now needs the token.
+//
+// The wildcard covers the bare path as well as everything under it, which is deliberate and is
+// asserted rather than assumed: the same thing was already true of `/api/demo` and it cost a
+// failing test to find out.
+app.use("/api/incidents/*", adminOnly);
+app.use("/api/services/*", adminOnly);
+
 app.get("/api/incidents", async (c) => {
   const repo = new Repo(c.env.DB);
   const incidents = await repo.listIncidents();
@@ -348,31 +386,6 @@ app.get("/api/services/:service/state", async (c) => {
     return c.json({ error: "no state recorded for that service" }, 404);
   return c.json({ state });
 });
-
-/**
- * Everything that decides which telephone rings sits behind this. It is not authentication, which
- * is phase 7: it is the floor until then, because an unguarded write here is a stranger's phone
- * going off at three in the morning, charged to the owner.
- *
- * The subtree is guarded in one place rather than route by route on purpose. A guard repeated at
- * nine handlers is a guard that will eventually be missing from the tenth.
- */
-const adminOnly: MiddlewareHandler<{ Bindings: Bindings }> = async (
-  c,
-  next,
-) => {
-  const config = readConfig(c.env);
-  const refusal = await adminRefusal(c, config);
-  if (refusal !== null) return refusal;
-  await next();
-  return undefined;
-};
-
-app.use("/api/config/*", adminOnly);
-
-// The audit trail carries the call transcript, which is personal data and is also the evidence
-// behind a production change. Neither belongs on the open read API.
-app.use("/api/audit/*", adminOnly);
 
 // The demo controls change a service's state and place a call, so on any deployment that is not the
 // public demo they are guarded exactly like the configuration is. On the public demo the guard
