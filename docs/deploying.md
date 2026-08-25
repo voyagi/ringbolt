@@ -11,8 +11,8 @@ wrangler login
 wrangler d1 create ringbolt --location=weur
 ```
 
-**Choose the location deliberately.** Without the flag D1 puts the primary instance near wherever
-the create request came from, which is wherever you happened to be sitting. This database holds
+Choose that location deliberately. Without the flag D1 puts the primary instance near wherever the
+create request came from, which is wherever you happened to be sitting. This database holds
 telephone numbers and transcripts of people talking, so an operator serving people in the EU wants
 `weur` or `eeur`. Cloudflare documents the hint as a hint rather than a guarantee, and the other
 values are `wnam`, `enam`, `apac` and `oc`. It cannot be changed afterwards without creating another
