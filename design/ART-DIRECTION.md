@@ -167,10 +167,14 @@ last hand-drawn thing in this folder.
 ## What is in design/mockups now
 
 Every screen, both themes, screenshots of the REAL built bundle rather than drawings of it:
-`deck`, `deck-narrow`, `incidents`, `incident`, `runbooks`, `rota` and `settings`, each with a
-`-night` and a `-day`. `npm run build && node scripts/render-screens.mjs` regenerates them from the
-same fixtures the accessibility gate audits, so the pictures in this folder and the pages the gate
-checks are the same pages.
+`deck`, `deck-narrow`, `incidents`, `incident`, `runbooks`, `rota`, `demo` and `settings`, each with
+a `-night` and a `-day`. `npm run build && node scripts/render-screens.mjs` regenerates them from
+the same fixtures the accessibility gate audits, so the pictures in this folder and the pages the
+gate checks are the same pages.
+
+They are rendered as the PUBLIC DEMO sees the product rather than as a laptop does, because that is
+the deployment a stranger opens. It is one line in `scripts/a11y-fixtures.mjs`, and it is why the
+rail says PUBLIC DEMO and the demo screen carries a card listing what cannot happen there.
 
 A hand-drawn mockup was the right artefact while the direction was being chosen and is the wrong one
 afterwards: a picture of a screen that no longer exists is worse than no picture, because somebody

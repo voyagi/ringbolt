@@ -32,6 +32,7 @@ Three values are plain configuration and live in `wrangler.jsonc` under `vars`:
 | `CALLE_CREDIT_USD`      | What this deployment may spend on real calls. Empty means nothing, and nothing is the default. |
 | `CALLE_LOCALE`          | The language the call is held in, BCP 47 with a region, for example `en-GB`. Live mode only.   |
 | `CALLE_REGION`          | The country the telephone is in, two letters, for example `NL`. Live mode only.                |
+| `DEMO_MODE`             | `true` makes this deployment the public demo, which is read only. See below.                   |
 
 The rest are secrets, set with `wrangler secret put` and never written to a file in this repository:
 
@@ -160,6 +161,47 @@ loss and recovery against the local database and prints how long each step took.
 a Durable Object class lifecycle change sits between the two versions, and Ringbolt declares its
 incident object in the first migration. Once that is deployed, forward is the only direction, so a
 change to that class is the one to be slow about.
+
+## The public demo
+
+A second deployment, with `DEMO_MODE` set to `true` in its `vars`, which anybody may open and
+nobody may change. It exists so the loop can be shown to a stranger without a way to trigger a real
+telephone call.
+
+**It has to be its own deployment with its own database.** A public demo publishes everything it
+holds: incidents, transcripts, decisions, and the names of the people who authorized them. Only
+telephone numbers are withheld. Pointing one at a database that carries real incidents publishes
+those instead.
+
+```bash
+wrangler d1 create ringbolt-demo          # its own database, never the real one
+# point wrangler.jsonc at it, set DEMO_MODE to true, then
+npm run db:migrate:remote
+npm run deploy
+curl -X POST https://your-demo-url/api/demo/seed
+```
+
+That last call writes the example estate: six incidents that between them show a call ending in a
+rollback, a call the responder held, an alert the policy refused to ring anybody about, and the call
+nobody was heard on. It is idempotent, so calling it twice writes nothing twice, and the demo screen
+offers the same thing as a button while the estate is empty.
+
+Four things the worker refuses on such a deployment, none of them a screen deciding not to draw a
+button:
+
+1. **It cannot be in live mode.** `DEMO_MODE` and `CALLE_MODE=live` together are a configuration
+   error, so the deployment refuses to serve at all rather than starting with a telephone attached.
+2. **Nothing may be written** except the demo controls, the intake endpoint, which still needs
+   `INTAKE_TOKEN`, and the CALL-E webhook, which is verified against the provider before any of it is
+   believed. Every other write is refused with a 403 whatever token is presented, including yours.
+3. **No runbook action may reach any host.** The allowlist is forced empty, so the only thing an
+   action can change is state Ringbolt owns.
+4. **Telephone numbers are withheld** from every read. Names stay, because a name is who authorized
+   a production change and that is the record.
+
+Because of the second rule, configuration on a demo deployment is a deploy rather than a request.
+Set the policy, the contacts and the rota on it by seeding, or turn `DEMO_MODE` off, configure it,
+and turn it back on.
 
 ## Pointing a monitor at it
 
