@@ -44,6 +44,7 @@ export const SCREENS = [
     settled: 'form.card',
   },
   { label: '/rota', reach: 'nav a[href="/rota"]', settled: 'ol.order' },
+  { label: '/demo', reach: 'nav a[href="/demo"]', settled: 'p.demo-state' },
   {
     label: '/settings',
     reach: 'nav a[href="/settings"]',
@@ -217,10 +218,52 @@ const BUDGET = {
  * one twice cannot mutate what the next read sees.
  */
 export const API_FIXTURES = {
+  /**
+   * The public demo rather than a laptop, because that is the deployment a
+   * stranger meets and it is the one with the most on screen: the demo's own
+   * refusals, and the rail saying what this deployment is.
+   */
   '/api/session': () => ({
-    admin: 'open',
-    environment: 'development',
+    admin: 'demo',
+    environment: 'production',
     calleMode: 'fake',
+  }),
+  /**
+   * The demo service mid-run: broken, with an incident already on the phone
+   * about it. That is the state with the most on the page, which is what an
+   * audit wants: both refusal sentences, both controls, and the panel that only
+   * appears while Ringbolt is doing something.
+   */
+  '/api/demo': () => ({
+    service: 'dockside',
+    health: 'failing',
+    activeRelease: '2026.08.25-b',
+    previousRelease: '2026.08.25-a',
+    killSwitch: false,
+    errorPercent: 23.4,
+    baselinePercent: 0.2,
+    faultyRelease: '2026.08.25-b',
+    healthyRelease: '2026.08.25-a',
+    changedAt: at(41),
+    now: new Date(NOW).toISOString(),
+    incident: {
+      id: 'inc_checkout_01',
+      state: 'calling',
+      wakeAt: new Date(NOW + 260 * 1000).toISOString(),
+      callAttempts: 2,
+    },
+    controls: {
+      breakIt: {
+        available: false,
+        why: 'dockside is already failing, so there is nothing left to break.',
+      },
+      repair: {
+        available: false,
+        why: 'Ringbolt is dealing with this one: inc_checkout_01 is calling. Putting the service back underneath a call in flight would leave the record saying something that did not happen.',
+      },
+      seed: { available: true, why: null },
+    },
+    publicDemo: true,
   }),
   '/api/budget': () => BUDGET,
   '/api/audit/board': () => ({
