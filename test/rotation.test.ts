@@ -10,7 +10,7 @@ import { readConfig } from "../src/worker/env.js";
 import { buildOrchestrator, immediateScheduler } from "../src/worker/wiring.js";
 import { resetTables } from "./support/reset.js";
 
-const TOKEN = "test-intake-token-0123456789";
+const TOKEN = "test-dummy-intake-token-0123456789";
 
 const alert: AlertPayload = {
   service: "checkout",

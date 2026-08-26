@@ -31,7 +31,7 @@ const implementations: { name: string; build: () => CallPlacer }[] = [
     name: "the CALL-E adapter",
     build: () =>
       new LiveCallPlacer({
-        apiKey: "test-key-contract-suite",
+        apiKey: "test-dummy-key-contract-suite",
         budget: {
           creditUsd: 1,
           spent: async () => 0,

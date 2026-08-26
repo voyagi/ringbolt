@@ -17,7 +17,7 @@ import { deliverWebhook, terminalCallFor } from "./support/webhook.js";
  * The stand-in reproduces the shape so the answer can be run rather than argued about, and
  * `docs/two-way-audio.md` carries the evidence and what a live call would settle.
  */
-const TOKEN = "test-intake-token-0123456789";
+const TOKEN = "test-dummy-intake-token-0123456789";
 
 async function postAlert(): Promise<string> {
   const response = await SELF.fetch(`https://ringbolt.test/intake/${TOKEN}`, {

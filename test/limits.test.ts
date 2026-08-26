@@ -9,8 +9,8 @@ import {
 } from "../src/worker/limits.js";
 import { resetTables } from "./support/reset.js";
 
-const ADMIN_TOKEN = "a-long-enough-admin-token";
-const INTAKE_TOKEN = "a-long-enough-intake-token";
+const ADMIN_TOKEN = "a-long-enough-dummy-admin-token";
+const INTAKE_TOKEN = "a-long-enough-dummy-intake-token";
 
 const alert = {
   service: "checkout",

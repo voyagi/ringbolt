@@ -16,7 +16,7 @@ import {
 } from "../src/worker/wiring.js";
 import { resetTables } from "./support/reset.js";
 
-const TOKEN = "test-intake-token-0123456789";
+const TOKEN = "test-dummy-intake-token-0123456789";
 
 /**
  * What the Durable Object's section does, in one isolate: run the callbacks one at a time. It is

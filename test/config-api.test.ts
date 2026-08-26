@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Repo } from "../src/db/repo.js";
 import { resetTables } from "./support/reset.js";
 
-const ADMIN_TOKEN = "a-long-enough-admin-token";
+const ADMIN_TOKEN = "a-long-enough-dummy-admin-token";
 
 type Options = { token?: string; body?: unknown; method?: string };
 
@@ -277,7 +277,8 @@ describe("who may change the configuration", () => {
 
   it("refuses the wrong token", async () => {
     expect(
-      (await config("/contacts", { token: "not-the-admin-token" })).status,
+      (await config("/contacts", { token: "not-the-dummy-admin-token" }))
+        .status,
     ).toBe(401);
   });
 

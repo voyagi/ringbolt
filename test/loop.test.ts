@@ -5,7 +5,7 @@ import { Repo } from "../src/db/repo.js";
 import { resetTables } from "./support/reset.js";
 import { deliverWebhook, terminalCallFor } from "./support/webhook.js";
 
-const TOKEN = "test-intake-token-0123456789";
+const TOKEN = "test-dummy-intake-token-0123456789";
 
 async function postAlert(body: unknown, token = TOKEN): Promise<Response> {
   return SELF.fetch(`https://ringbolt.test/intake/${token}`, {

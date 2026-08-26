@@ -14,7 +14,7 @@ import {
 } from "../src/worker/wiring.js";
 import { resetTables } from "./support/reset.js";
 
-const TOKEN = "test-intake-token-0123456789";
+const TOKEN = "test-dummy-intake-token-0123456789";
 const SERVICE = "checkout";
 const TITLE = "Payment errors above 20 percent";
 const MINUTE = 60 * 1000;
