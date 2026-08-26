@@ -5,7 +5,7 @@ import { defaultPolicy } from "../src/domain/policy.js";
 import { resetTables } from "./support/reset.js";
 import { deliverWebhook, terminalCallFor } from "./support/webhook.js";
 
-const ADMIN_TOKEN = "a-long-enough-admin-token";
+const ADMIN_TOKEN = "a-long-enough-dummy-admin-token";
 
 type Options = { method?: string; body?: unknown; token?: string };
 
@@ -216,7 +216,7 @@ describe("the audit trail", () => {
   it("carries the transcript, the decision and what ran, in one answer", async () => {
     const accepted = await bodyOf<{ incident: string }>(
       await SELF.fetch(
-        "https://ringbolt.test/intake/test-intake-token-0123456789",
+        "https://ringbolt.test/intake/test-dummy-intake-token-0123456789",
         {
           method: "POST",
           headers: { "content-type": "application/json" },

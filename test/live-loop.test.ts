@@ -30,7 +30,7 @@ const LIVE_ENV = {
   RINGBOLT_ENV: "production",
   CALLE_MODE: "live",
   PUBLIC_BASE_URL: "https://ringbolt.example.com",
-  INTAKE_TOKEN: "a-long-enough-intake-token",
+  INTAKE_TOKEN: "a-long-enough-dummy-intake-token",
   CALLE_API_KEY: "test-key-live-loop",
   DEMO_PHONE: "+31612345678",
   CALLE_LOCALE: "en-GB",

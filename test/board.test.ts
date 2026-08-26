@@ -9,7 +9,7 @@ import {
 import { resetTables } from "./support/reset.js";
 import { deliverWebhook, terminalCallFor } from "./support/webhook.js";
 
-const ADMIN_TOKEN = "a-long-enough-admin-token";
+const ADMIN_TOKEN = "a-long-enough-dummy-admin-token";
 
 async function api(path: string, token?: string): Promise<Response> {
   const headers: Record<string, string> = {};
@@ -25,7 +25,7 @@ async function raise(
   alert: Record<string, unknown>,
 ): Promise<{ incident: string }> {
   const response = await SELF.fetch(
-    "https://ringbolt.test/intake/test-intake-token-0123456789",
+    "https://ringbolt.test/intake/test-dummy-intake-token-0123456789",
     {
       method: "POST",
       headers: { "content-type": "application/json" },

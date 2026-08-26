@@ -15,7 +15,7 @@ import { allowedActionHosts, readConfig } from "../src/worker/env.js";
 import { resetTables } from "./support/reset.js";
 import { deliverWebhook, terminalCallFor } from "./support/webhook.js";
 
-const ADMIN_TOKEN = "a-long-enough-admin-token";
+const ADMIN_TOKEN = "a-long-enough-dummy-admin-token";
 
 /** Vars the worker reads that are not in the generated binding type, and are mutable from here. */
 const vars = env as unknown as Record<string, string | undefined>;
@@ -297,7 +297,7 @@ describe("the public demo", () => {
       RINGBOLT_ENV: "production",
       PUBLIC_BASE_URL: "https://ringbolt.example.com",
       CALLE_MODE: "live",
-      CALLE_API_KEY: "test-key-configuration",
+      CALLE_API_KEY: "test-dummy-key-configuration",
       DEMO_PHONE: "+31612345678",
       CALLE_LOCALE: "en-GB",
       CALLE_REGION: "NL",

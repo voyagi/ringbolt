@@ -18,7 +18,7 @@ import {
   calleApiStub,
 } from "./support/calle-api.js";
 
-const API_KEY = "test-key-not-a-real-credential";
+const API_KEY = "test-dummy-key-not-a-real-credential";
 const OWNED_NUMBER = "+31612345678";
 
 /** A dollar, which at five cents a call is twenty of them. */
