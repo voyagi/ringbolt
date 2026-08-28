@@ -49,6 +49,7 @@ const ALLOWED_ROOT_FILES = new Set([
   'eslint.config.mjs',
   'package-lock.json',
   'package.json',
+  'renovate.json',
   'stryker.config.json',
   'tsconfig.json',
   'verify-ship.mjs',
