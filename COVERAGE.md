@@ -139,7 +139,7 @@ lean on has its own boundary tests in `src/domain/view.test.ts`.
   unit of tenancy is the deployment, so there are no accounts to cover.
 - A person clicking the demo against a real deployed Worker. Every control it offers is exercised
   against the same fixtures the accessibility gate audits, and the loop behind those controls runs
-  in the suite, but the end to end click-through is a test that needs a deployment, and none has
+  in the suite, but the end-to-end click-through is a test that needs a deployment, and none has
   happened yet.
 - A real telephone. No call this product has placed has yet been a two way conversation, and
   `docs/two-way-audio.md` is the whole of what is known about that.
