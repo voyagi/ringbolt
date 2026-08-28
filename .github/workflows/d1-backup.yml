@@ -33,9 +33,10 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          # 22 because this job runs wrangler, which declares node >=22.0.0. It was pinned to 20,
-          # and since the job only runs when D1_BACKUP_ENABLED is true, that would have surfaced as
-          # a failed backup on the day somebody first switched backups on.
+          # Same line as the gates workflow, and for the same reason: a bare major resolves to the
+          # latest of it, which satisfies engines.node in package.json. It was pinned to 20, and
+          # since this job only runs when D1_BACKUP_ENABLED is true, that would have surfaced as a
+          # failed backup on the day somebody first switched backups on rather than in CI.
           node-version: 22
           cache: npm
       - run: npm ci
