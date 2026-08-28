@@ -1,13 +1,12 @@
 # What the tests actually cover
 
-Measured 2026-08-25 on `main`, except the mutation score, which carries its own date below. Every
-number here is the output of the command beside it, run on the day given. Nothing is estimated, and
-a number nobody can reproduce is not in this file.
+Measured 2026-08-28 on `main`. Every number here is the output of the command beside it, run on
+the day given. Nothing is estimated, and a number nobody can reproduce is not in this file.
 
 ## The suite
 
-`npm test` runs 373 tests across 28 files inside a real Workers isolate against a real D1, in about
-17 seconds. Nothing in it can reach a telephone: `vitest.config.ts` pins the mode to the local
+`npm test` runs 412 tests across 30 files inside a real Workers isolate against a real D1, in about
+19 seconds. Nothing in it can reach a telephone: `vitest.config.ts` pins the mode to the local
 stand-in, the API key to a string that cannot authenticate, the number to an unassigned country
 code, and the only host a runbook action may call to a name that does not resolve.
 
@@ -18,14 +17,14 @@ V8 coverage:
 
 |            |        |
 | ---------- | ------ |
-| Statements | 72.49% |
-| Branches   | 62.10% |
-| Functions  | 63.68% |
-| Lines      | 73.96% |
+| Statements | 73.14% |
+| Branches   | 62.46% |
+| Functions  | 64.53% |
+| Lines      | 74.52% |
 
 **That is a fall from 91.31% statements, and the whole of it is the dashboard.** The server halves
-are where they were or better: `src/db` 98%, `src/domain` 93%, `src/actions` 93%, `src/demo` 95%,
-`src/calle` 89%, `src/worker` 88%. The dashboard's screens are 2%, and the number is worth reading
+are where they were or better: `src/db` 99%, `src/domain` 94%, `src/actions` 93%, `src/demo` 95%,
+`src/calle` 89%, `src/worker` 91%. The dashboard's screens are 2%, and the number is worth reading
 in that shape rather than as one figure.
 
 They are not untested. They are tested by something line coverage cannot see: `npm run a11y:live`
@@ -57,16 +56,22 @@ Where the server gaps are, and why they are where they are:
 suite would have noticed if the line were wrong, which is the question worth asking of an
 authorization gate.
 
-Measured 2026-08-24: **75.62%** overall, 614 mutants killed of 785. Still the live figure on
-2026-08-25: `stryker.config.json` names seven modules to mutate and this phase changed none of
-them, apart from adding types to `view.ts`, which are erased before a mutant can be made of one.
+Measured 2026-08-28: **76.10%** overall, 640 of 841 mutants detected (639 killed, one timeout).
+The previous figure was 75.62% on 2026-08-24, before the hardening work grew `decision.ts` and
+`view.ts` with the rule that a confirmation nobody is recorded saying is refused. Re-measuring
+after that change surfaced three undetected mutants in the new transcript search, all three at its
+boundaries: a phrase carried by the very first turn, and a required phrase that normalises to no
+words at all. The search now has direct tests for those boundaries and the mutants are killed. The
+two mutants still alive in it are equivalent, not gaps: an out-of-bounds loop start that the
+undefined guard absorbs without changing any answer, and that guard itself, which exists to absorb
+exactly that.
 
 | Module                      | Score  | What it decides                                    |
 | --------------------------- | ------ | -------------------------------------------------- |
 | `src/domain/policy.ts`      | 84.78% | Whether a telephone rings at all, and when         |
-| `src/domain/decision.ts`    | 80.59% | Whether a spoken decision may change production    |
+| `src/domain/decision.ts`    | 80.90% | Whether a spoken decision may change production    |
 | `src/actions/parameters.ts` | 79.43% | What values reach the system being changed         |
-| `src/domain/view.ts`        | 77.85% | What every screen says about a state               |
+| `src/domain/view.ts`        | 79.33% | What every screen says about a state               |
 | `src/domain/incident.ts`    | 70.49% | The state machine and how an incident is described |
 | `src/domain/rotation.ts`    | 32.14% | Who is called next                                 |
 | `src/domain/brief.ts`       | 14.29% | What the caller says                               |
@@ -90,7 +95,11 @@ those need a Workers isolate and a D1 database and would take hours per mutant.
 
 So the score covers the decisions and excludes the plumbing. Not measured by it: the Durable
 Object, the D1 access layer, the HTTP routes, the runbook execution engine, the CALL-E adapter, the
-reconciliation sweep and every screen. Those are covered by the suite and by the accessibility gate.
+reconciliation sweep, the rate limiter, the retention sweep and every screen. Those are covered by
+the suite and by the accessibility gate, and the last two are the hardening additions
+(`src/worker/limits.ts`, `src/worker/retention.ts`): thin orchestration over the database layer,
+whose decisions live in SQL and are held by planted-fault tests in `test/`, so putting them on the
+mutation list would measure the stand-in database rather than them.
 
 ## What is proven by breaking it on purpose
 
@@ -115,16 +124,22 @@ to a real telephone, a runbook action allowed its allowlist, an unreadable switc
 off, the example history seeded into a rota somebody is on call for, seeding twice, and three on
 the rehearsed conversation.
 
-**One of those thirteen is why there is a finding written into the roadmap.** Making the rehearsed
-responder say "Go ahead." while the decision still carries "roll it back" does not stop the action:
-the authorization gate reads the confirmation phrase off the provider's extracted result and never
-asks whether the transcript contains it. The loop still resolves, and only the transcript-evidence
-test notices. That is a gap in the product's central claim rather than a gap in a test.
+**One of those thirteen found a real gap in the product's central claim, and the gap is closed.**
+Making the rehearsed responder say "Go ahead." while the decision still carried "roll it back" did
+not stop the action: the gate read the confirmation phrase off the field the provider extracted and
+never asked whether anybody was recorded saying it. That is now the gate's third question, and the
+same planted conversation is refused as `confirmation_not_in_transcript`. Example tests in
+`src/domain/decision.test.ts` and a property test beside them hold the rule, and the search they
+lean on has its own boundary tests in `src/domain/view.test.ts`.
 
 ## Not covered by anything yet
 
-- Authentication proper. Everything the dashboard reads and writes is behind one shared
-  administrator token, and a retention window that deletes transcripts on a schedule does not exist
-  yet. Phase 7.
+- An account system. Everything administrative is behind one shared token, and that is a decision
+  with its reasons written in `docs/adr/0002-tenancy.md` rather than a gap waiting for tests: the
+  unit of tenancy is the deployment, so there are no accounts to cover.
+- A person clicking the demo against a real deployed Worker. Every control it offers is exercised
+  against the same fixtures the accessibility gate audits, and the loop behind those controls runs
+  in the suite, but the end to end click-through is a test that needs a deployment, and none has
+  happened yet.
 - A real telephone. No call this product has placed has yet been a two way conversation, and
   `docs/two-way-audio.md` is the whole of what is known about that.
