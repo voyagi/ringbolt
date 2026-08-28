@@ -33,7 +33,12 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          # The same exact pin as the gates workflow, for the same reason: setup-node takes any
+          # CACHED matching release rather than the newest of a bare major, so a bare `22` can land
+          # below the floor engines.node declares. It was pinned to 20, and since this job only
+          # runs when D1_BACKUP_ENABLED is true, that would have surfaced as a failed backup on the
+          # day somebody first switched backups on rather than in CI.
+          node-version: 22.18.0
           cache: npm
       - run: npm ci
       # Loud rather than skipped. A missing token here means no backup was taken, and the whole
