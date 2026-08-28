@@ -1,0 +1,15 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Dependency updates arrive as pull requests a person reads and merges. Nothing here merges itself, and that is the whole point of this file rather than an inherited config.",
+    "This repository deliberately does NOT extend the shared org preset. That preset sets automerge true for patch and minor updates with platformAutomerge false, which means Renovate merges the pull request itself using its own credentials rather than through the platform. The repository setting allow_auto_merge is false, but that only governs the platform feature, so it would not stop it.",
+    "That matters here specifically: this repository is a competition entry, and from submission until results are published nothing at all may reach the default branch, dependency bot pull requests included. A bot able to merge on its own is exactly the hazard that rule exists to prevent, and it would fire while nobody is looking.",
+    "Whether repo packageRules override preset packageRules turns out to be genuinely ambiguous in Renovate's own discussions, so this config does not rely on overriding the preset. It states what it wants outright, and what the file says is what happens.",
+    "Everything else follows the same shape as the shared preset: the recommended base, pinned action digests, a concurrency cap, and a weekly window."
+  ],
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "automerge": false,
+  "platformAutomerge": false,
+  "prConcurrentLimit": 3,
+  "schedule": ["before 9am on Monday"]
+}
