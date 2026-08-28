@@ -6,11 +6,13 @@
     "That matters here specifically: this repository is a competition entry, and from submission until results are published nothing at all may reach the default branch, dependency bot pull requests included. A bot able to merge on its own is exactly the hazard that rule exists to prevent, and it would fire while nobody is looking.",
     "Whether repo packageRules override preset packageRules turns out to be genuinely ambiguous in Renovate's own discussions, so this config does not rely on overriding the preset. It states what it wants outright, and what the file says is what happens.",
     "Everything else follows the same shape as the shared preset: the recommended base, pinned action digests, a concurrency cap, and a weekly window.",
-    "The schedule is cron rather than the readable form the shared preset uses. Renovate's own docs mark the readable syntax deprecated and say they plan to drop the library behind it in a future major release, so the readable form is a future breakage rather than a style choice. '* 0-8 * * 1' is Monday from midnight to 08:59, which is the same window as 'before 9am on Monday'."
+    "The schedule is cron rather than the readable form the shared preset uses. Renovate's own docs mark the readable syntax deprecated and say they plan to drop the library behind it in a future major release, so the readable form is a future breakage rather than a style choice. '* 0-8 * * 1' is Monday from midnight to 08:59.",
+    "The timezone is set rather than left out, because Renovate evaluates schedules in UTC when it is missing. Left out, a Monday morning window would land two hours later than it reads during summer time and one hour later in winter, so the file would quietly mean something other than what it says. The minute field stays a wildcard because Renovate works to the hour and rejects finer granularity."
   ],
   "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
   "automerge": false,
   "platformAutomerge": false,
   "prConcurrentLimit": 3,
+  "timezone": "Europe/Amsterdam",
   "schedule": ["* 0-8 * * 1"]
 }
