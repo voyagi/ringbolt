@@ -3,10 +3,10 @@
 // defects it claims to catch.
 //
 // A gate that only ever passes is indistinguishable from a gate that checks
-// nothing. This is the Workshop's P1 discipline (every gate demonstrated
-// failing) applied to accessibility, and it is not theoretical: on launch-kiln
-// a static a11y pass was green while five real WCAG defects shipped to
-// production. The green meant nothing, and nobody could tell.
+// nothing, so every gate here has to be watched failing at least once. That is
+// not theoretical: a static accessibility pass on an earlier project of ours
+// was green while five real WCAG defects shipped to production. The green meant
+// nothing, and nobody could tell.
 //
 // Each case reintroduces one real defect into the BUILT output, runs the gate,
 // and expects a non-zero exit AND the specific rule id in the output. Checking
@@ -20,19 +20,13 @@
 // proof ("npm run a11y:prove"). Run it when the gate is first wired, and again
 // whenever the gate or the design system changes.
 //
-// WIRING
-//
-//   copy to the product repo (scripts/a11y-prove.mjs)
-//   "a11y:prove": "node scripts/a11y-prove.mjs"
-//   adapt BUILD_CMD / GATE_CMD below, then write real CASES
-//
 // WRITING CASES - the part that carries the value
 //
 // Do NOT invent plausible defects. Use the ones this product actually shipped
 // or nearly shipped, one case per class the gate claims to cover. Seed the list
 // from the first live Lighthouse or axe run after deploy: every defect it finds
-// that the gate missed is, by definition, a case the gate needs. The launch-kiln
-// set covered five classes worth stealing as a template:
+// that the gate missed is, by definition, a case the gate needs. These five
+// classes are the ones that have caught real regressions here:
 //
 //   1. a contrast failure in the NON-default theme only
 //   2. an aria-label overriding visible text (WCAG 2.5.3, an experimental axe
@@ -51,7 +45,7 @@ import { spawnSync } from 'node:child_process'
 import { join } from 'node:path'
 
 // ===========================================================================
-// CONFIG - edit for the product
+// CONFIG
 // ===========================================================================
 
 const BUILD_CMD = 'npm run build'

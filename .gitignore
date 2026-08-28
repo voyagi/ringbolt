@@ -21,11 +21,4 @@ npm-debug.log*
 .idea/
 *.swp
 
-.planning/
-.crash-buffers/
-.claude/
-CLAUDE.md
-
 worker-configuration.d.ts
-HUMAN-TODO.md
-.build-lane

@@ -1,7 +1,10 @@
-# CI floor for the Wave 1 scaffold gates. Drop into .github/workflows/ in the product repo.
-# Runs the SAME `npm run gate` scripts as the local pre-commit hook = one source of truth, no drift.
-# Lean on purpose (PR + default-branch push only): public repos get unlimited Actions minutes, private
-# repos are metered, so do not add a schedule here (see SHIP-SAFE-CHECKLIST.md "Actions budget").
+# The quality floor for Ringbolt, run on every pull request and every push to the default branch.
+# It runs the SAME `npm run` scripts as the local pre-commit hook, so there is one source of truth
+# and no drift between what passes here and what passes on a laptop.
+#
+# Deliberately lean, with no schedule: this repository is private, and private repositories are
+# metered on Actions minutes. Public ones are not, so a schedule can be reconsidered after it goes
+# public, but nothing here needs one.
 name: gates
 on:
   pull_request:
@@ -20,18 +23,16 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      # SHA-pinned (estate decision 2026-07-19, aligning with launch-kiln's shipped CI): a tag is
-      # mutable, a commit SHA is not. Trailing comment names the tag the SHA was verified against
-      # (git ls-remote) so bumps stay reviewable. Update SHAs deliberately, never back to bare tags.
+      # SHA-pinned rather than tag-pinned: a tag is mutable, a commit SHA is not. The trailing
+      # comment names the tag the SHA was verified against (git ls-remote) so a bump stays
+      # reviewable. Update SHAs deliberately, never back to bare tags.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          # align with the product's .nvmrc / package.json engines.node; if it has a .nvmrc,
-          # prefer `node-version-file: '.nvmrc'` so CI and local never drift.
+          # Matches engines.node in package.json. If a .nvmrc is ever added, switch this to
+          # node-version-file so the two can never drift apart.
           node-version: 20
           cache: npm
-      # Swap `npm ci` + the `npm run` calls below for the product's package manager (pnpm/bun/yarn)
-      # if it does not use npm - this file hardcodes npm.
       - run: npm ci
       # The accessibility gate drives a real browser against the built output. ubuntu-latest ships
       # Google Chrome at this path; a11y-live.mjs finds it there, and prints every path it looked in
@@ -42,8 +43,10 @@ jobs:
       # again as one of its own steps, which is deliberate: this line keeps the client-secret step
       # below independent of what verify:ship happens to do, and a second vite build costs a second.
       - run: npm run build
-      # Each gate is a FLOOR: green = no known violation, never "good". Taste/craft is NOT gated here
-      # (it routes to the decorrelated reviewer). Do not "make the gate pass" by suppressing it.
+      # Each gate is a FLOOR: green means no known violation, never "good". Taste and craft are not
+      # gated here and cannot be, so do not read a green run as a review. Never make a gate pass by
+      # suppressing it.
+      #
       # verify:ship rather than gate: there is no separate test workflow, so this is the only place
       # CI runs the full surface (types, the whole suite, whole-repo lint, build, the gate chain,
       # then the live accessibility audit).
@@ -52,19 +55,12 @@ jobs:
       # explicitly rather than left to auto-detect: this repo builds the Worker and the client from
       # one tree, and a gate that scanned all of `dist` would be reading server code, which is where
       # a secret is CORRECT.
+      #
+      # It is its own step rather than part of `npm run gate` because it needs a BUILT bundle, and
+      # `gate` also runs in the pre-commit hook where none exists. There it would correctly report
+      # UNKNOWN (exit 2) and fail every commit, and a gate that fails every commit gets deleted
+      # within a day. Here the build step above always precedes it.
+      #
+      # If this ever exits 2 saying no bundle was found, the fix is the path, not the step: pass the
+      # directory that actually holds the client build.
       - run: node scripts/vendor/check-client-secrets.mjs dist/client
-      # Client-secret gate, as its OWN step rather than inside `npm run gate`. It needs a BUILT
-      # bundle, and `gate` also runs in the pre-commit hook where none exists - there it would
-      # correctly report UNKNOWN (exit 2) and fail every commit, so it would be deleted within a
-      # day. Here a build always precedes it (the step above). This is the mechanical wiring: a
-      # prompt line telling a model to run the gate is the thing the gate itself argues against.
-      # If this exits 2 saying no bundle was found, the fix is almost never to delete the step. The
-      # gate auto-detects the common layouts, and a monorepo (packages/web/dist) or a custom outDir
-      # is found by NO fixed list, so PASS THE DIRECTORY: `node scripts/vendor/check-client-secrets.mjs
-      # packages/web/dist`. It accepts several. Delete this step ONLY on a product that genuinely
-      # ships no client bundle at all (a CLI, a pure backend) - a Next.js app or a monorepo package
-      # HAS one, and deleting the gate there removes it from exactly the products it protects.
-      # If the product has no separate test/lint workflow, swap the step above for
-      # `npm run verify:ship` (types -> FULL tests -> whole-repo lint -> gate) so CI enforces
-      # the same full surface the local ship step verifies. With a separate test workflow,
-      # keep `npm run gate` here to avoid running the suite twice.

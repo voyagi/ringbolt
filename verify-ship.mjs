@@ -18,13 +18,11 @@
 // `gate` re-runs the type-check inside its own chain; the duplication is
 // deliberate - step 1 fails fast on the cheapest honest signal.
 //
-// Wiring: copy this file to the product repo root and add
-//   "verify:ship": "node verify-ship.mjs"
-// to package.json scripts. Adapt the STEPS commands to the product's real
-// scripts (they must exist - a missing script exits non-zero, which is the
-// correct fail-closed behavior). A watch-mode test script will hang this gate:
-// `npm test` must be a one-shot run (e.g. `vitest run`, not `vitest`) - and as
-// a backstop each step is killed (and FAILS) after STEP_TIMEOUT_MS.
+// Run it with `npm run verify:ship`. Every command in STEPS below has to exist
+// as a package script: a missing one exits non-zero, which is the correct
+// fail-closed behaviour. `npm test` must be a one-shot run (`vitest run`, not
+// `vitest`), because a watch-mode script would hang this gate forever, and as a
+// backstop each step is killed and FAILS after STEP_TIMEOUT_MS.
 //
 // Residual limitations (not fixable here):
 //   - On POSIX the kernel truncates a child's exit status to 8 bits, so a tool
@@ -41,8 +39,8 @@ import { spawnSync } from 'node:child_process';
 // product if a real run needs more.
 // Overridable via VERIFY_SHIP_TIMEOUT_MS so the backstop is PROVABLE: with a
 // hardcoded 30 min the only way to exercise this branch was to edit the file,
-// which means nobody ever proved it fires (the Workshop's P1 asks every gate to
-// be demonstrated failing). `npx cross-env VERIFY_SHIP_TIMEOUT_MS=4000 npm run
+// which means nobody ever proved it fires, and an unproven gate is not a gate.
+// `npx cross-env VERIFY_SHIP_TIMEOUT_MS=4000 npm run
 // verify:ship` against a deliberately hung script shows it working in seconds.
 // A non-numeric or non-positive value falls back to the default rather than
 // disabling the guard - an env typo must not silently remove the backstop.

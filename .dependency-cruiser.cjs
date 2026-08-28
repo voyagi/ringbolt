@@ -1,6 +1,8 @@
-// Architecture-boundary rules = externalized memory (the rule file IS the documented architecture).
-// NARROW: only boundaries that genuinely must not be crossed, each an error. EDIT the path regexes
-// to the product's real layers; keep the set small and meaningful (a wall nobody respects is noise).
+// Architecture-boundary rules. This file IS the documented architecture, which is the point: a
+// boundary written only in a README is a boundary nobody can fail.
+//
+// Deliberately narrow. Only boundaries that genuinely must not be crossed are listed, and each is
+// an error rather than a warning, because a wall nobody respects is noise.
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -9,9 +11,9 @@ module.exports = {
     {
       name: 'no-ui-to-server',
       severity: 'error',
-      // SECURITY-RELEVANT + LAYOUT-SPECIFIC. The scaffold shipped this pointing at `^src/server`,
-      // which does not exist in this repo, so it matched nothing and reported a clean run while
-      // protecting nothing at all. These are Ringbolt's real layers.
+      // SECURITY-RELEVANT AND LAYOUT-SPECIFIC. This rule once pointed at `^src/server`, a path
+      // that does not exist here, so it matched nothing and reported a clean run while protecting
+      // nothing at all. The paths below are Ringbolt's real layers, checked against the tree.
       //
       // `src/ui` is the browser bundle a stranger can read. Everything named on the `to` side
       // reaches D1, a Durable Object, the CALL-E key, or a runbook credential, and one import from
@@ -23,7 +25,7 @@ module.exports = {
       // import. Everything else in `src/domain` pulls zod and the state machine with it.
       //
       // Smoke-tested by planting `import { Repo } from "../db/repo.js"` in a screen and watching
-      // this fail, which is the half the scaffold's own comment says is skipped most often.
+      // this fail. A boundary rule nobody has seen fail is a boundary rule nobody knows works.
       comment: 'The dashboard bundle must not import server-only modules: they carry the database, the telephone credential and the runbook secrets.',
       from: { path: '^src/ui' },
       to: {
