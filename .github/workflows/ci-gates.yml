@@ -29,10 +29,14 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          # Matches engines.node in package.json, and both are set by wrangler, which declares
-          # node >=22.0.0. Pinning 20 here made this workflow fail on its very first run: the
-          # version worked on the machine it was written on and nowhere else, which is the whole
-          # reason CI runs on a clean clone.
+          # setup-node resolves a bare major to the LATEST of that line, so this is 22.20 or newer
+          # and satisfies engines.node, which is "^22.18.0 || ^24.0.0 || >=26.0.0". That range is
+          # not a preference: it is the intersection of what every direct dependency declares,
+          # computed rather than guessed. size-limit is the binding one at ^22.18.0, and it plus
+          # dependency-cruiser are why 23.x and 25.x are excluded rather than merely untested.
+          #
+          # This was pinned to 20 and failed on the workflow's first ever run, because wrangler
+          # needs 22 and the machine it was written on runs 24. That is what a clean clone is for.
           node-version: 22
           cache: npm
       - run: npm ci
