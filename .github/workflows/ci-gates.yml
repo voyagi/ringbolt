@@ -29,9 +29,11 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          # Matches engines.node in package.json. If a .nvmrc is ever added, switch this to
-          # node-version-file so the two can never drift apart.
-          node-version: 20
+          # Matches engines.node in package.json, and both are set by wrangler, which declares
+          # node >=22.0.0. Pinning 20 here made this workflow fail on its very first run: the
+          # version worked on the machine it was written on and nowhere else, which is the whole
+          # reason CI runs on a clean clone.
+          node-version: 22
           cache: npm
       - run: npm ci
       # The accessibility gate drives a real browser against the built output. ubuntu-latest ships
