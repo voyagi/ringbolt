@@ -11,6 +11,7 @@ import {
   severityAtLeast,
   sinceWords,
   toneForState,
+  turnGranting,
   verifiedFlag,
 } from "./view.js";
 
@@ -132,6 +133,53 @@ describe("the contract both halves of the product read", () => {
     it("normalises to words and nothing else", () => {
       expect(normalisePhrase("Roll -- it back!")).toBe("roll it back");
       expect(normalisePhrase("   ")).toBe("");
+    });
+  });
+
+  /**
+   * The gate's third question and the deck's red tie both come from this search, so its boundaries
+   * are product claims: the turn it returns is presented as the moment permission was granted.
+   */
+  describe("which turn granted permission", () => {
+    it("finds the words inside a sentence, and the last saying of them wins", () => {
+      const index = turnGranting(
+        [
+          { speaker: "assistant", text: "Say roll it back to confirm." },
+          { speaker: "user", text: "So I would say roll it back?" },
+          { speaker: "user", text: "Yes. Roll it back, please." },
+        ],
+        "roll it back",
+      );
+      expect(index).toBe(2);
+    });
+
+    /** A responder can answer before Ringbolt says a word, and the search must reach that turn. */
+    it("finds a phrase carried by the very first turn", () => {
+      expect(
+        turnGranting(
+          [{ speaker: "user", text: "Roll it back." }],
+          "roll it back",
+        ),
+      ).toBe(0);
+    });
+
+    it("marks nothing for words only Ringbolt said", () => {
+      expect(
+        turnGranting(
+          [{ speaker: "assistant", text: "Roll it back." }],
+          "roll it back",
+        ),
+      ).toBeNull();
+    });
+
+    /**
+     * A phrase that normalises to nothing is contained in every sentence, so without this rule the
+     * last thing the responder said, whatever it was, would be marked as the authorization.
+     */
+    it("marks nothing when the required phrase has no words in it", () => {
+      const spoken = [{ speaker: "user", text: "Go ahead." }];
+      expect(turnGranting(spoken, "")).toBeNull();
+      expect(turnGranting(spoken, " -- !!")).toBeNull();
     });
   });
 
