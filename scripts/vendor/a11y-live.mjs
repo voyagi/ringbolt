@@ -4,7 +4,7 @@
 //
 // WHY THIS EXISTS AS A SEPARATE GATE FROM A STATIC a11y PASS
 //
-// Born from a real escape on launch-kiln (2026-07-20). That product had a
+// Born from a real escape on an earlier project of ours (2026-07-20). It had a
 // static accessibility script: a regex pass over source text. It was green.
 // Five real WCAG defects shipped to production anyway, and a live Lighthouse
 // run after deploy is what found them. The static pass could not have caught a
@@ -25,31 +25,26 @@
 // Treat a static a11y script as a fast lint, never as the gate. This is the
 // gate.
 //
-// FOUR PROPERTIES WORTH KEEPING WHEN YOU ADAPT THIS
+// FOUR PROPERTIES THIS GATE IS BUILT AROUND
 //
 //   1. Every theme, not just the default. The dark theme resolves different
-//      colour tokens; on launch-kiln it failed contrast while light passed.
+//      colour tokens, and on that earlier project it failed contrast while the
+//      light theme passed.
 //   2. Populated state, not just the empty page. Boards, summaries and lists
 //      that only render once there is data are invisible to a cold-load audit.
 //   3. axe "incomplete" means UNDETERMINED, and undetermined is not clean.
-//      Swallowing incomplete results silently hid 632 of them on launch-kiln,
-//      one of which was a real defect. They fail here unless a documented
-//      limitation of axe itself explains them.
+//      Swallowing incomplete results silently hid 632 of them there, one of
+//      which was a real defect. They fail here unless a documented limitation
+//      of axe itself explains them.
 //   4. Assert the navigation and the theme actually took hold. A 404 still
 //      renders a page that axe is perfectly happy with, so an unchecked
 //      navigation lets the gate print "passed" for a page it never audited.
 //
-// WIRING
+// Run it with `npm run a11y:live`. It sits in verify-ship.mjs AFTER the build
+// step, because it audits built output rather than source. Its matching proof
+// harness is a11y-prove.mjs: a gate nobody has watched fail is not a gate.
 //
-//   npm i -D puppeteer-core axe-core
-//   copy this file to the product repo (scripts/a11y-live.mjs)
-//   "a11y:live": "node scripts/a11y-live.mjs"
-//   add it to verify-ship.mjs AFTER the build step (it audits built output)
-//
-// Then edit the CONFIG block below, and write the matching a11y-prove.mjs
-// cases. A gate nobody has watched fail is not a gate.
-//
-// Point A11Y_BASE_URL at the product's own preview server when it has one:
+// Point A11Y_BASE_URL at a preview server when there is one:
 // serving the built output under the REAL production headers is strictly
 // better than the fallback server here, which serves no headers. axe is
 // injected with page.evaluate rather than addScriptTag precisely so a strict
@@ -57,13 +52,12 @@
 //
 // WHY THIS DRIVES PUPPETEER RATHER THAN PLAYWRIGHT
 //
-// The file shipped wired to @playwright/test. This machine refuses to run any
-// command naming Playwright at all, so the gate could not be installed, and a
-// gate that cannot be installed is worse than an adapted one: the accessibility
-// audit would have been a prompt line rather than a step. puppeteer-core drives
-// the same protocol against a browser already on the machine and downloads
-// nothing. All four properties above are unchanged, and every call that moved
-// is named here so the swap is reviewable:
+// This started out wired to @playwright/test, which cannot run in the
+// environment this project is built in. A gate that cannot run is worse than an
+// adapted one, because the accessibility audit then exists only as an intention.
+// puppeteer-core drives the same protocol against a browser already installed
+// and downloads nothing. All four properties above are unchanged, and every
+// call that moved is named here so the swap stays reviewable:
 //
 //   chromium.launch({channel})   -> puppeteer.launch({executablePath})
 //   page.emulateMedia(...)       -> page.emulateMediaFeatures([...])
@@ -146,7 +140,7 @@ const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']
 
 // axe SKIPS rules tagged experimental even when their WCAG tag is selected, so
 // a tag filter alone silently drops them. label-content-name-mismatch covers
-// WCAG 2.5.3 Label in Name, a real launch-kiln defect. Enable explicitly.
+// WCAG 2.5.3 Label in Name, one of the five that escaped. Enable explicitly.
 const EXPERIMENTAL_RULES = ['label-content-name-mismatch']
 
 // Undetermined results that a documented limitation of axe explains. Everything

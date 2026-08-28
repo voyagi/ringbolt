@@ -77,8 +77,9 @@ cents whether or not anybody speaks, so this is one deliberate call, not a debug
 
 1. Set `CALLE_LOCALE` and `CALLE_REGION` in `.dev.vars` to match the phone being called, for
    example `en-GB` and `NL`. Set `CALLE_CREDIT_USD` to the top-up amount and nothing more.
-2. Place one call by the procedure in `HUMAN-TODO.md`. Answer it and say something ordinary early,
-   before Ringbolt has finished its opening sentence, then answer normally.
+2. Place one call by the procedure under "Real calls" in `docs/deploying.md`. Answer it and say
+   something ordinary early, before Ringbolt has finished its opening sentence, then answer
+   normally.
 3. Read the call back from the API and look at the transcript.
 
 What the result means:

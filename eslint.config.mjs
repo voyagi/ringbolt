@@ -1,10 +1,10 @@
-// Complexity budgets + cross-browser compat - the ESLint half of the Wave 1 scaffold gates.
-// MERGE these blocks into the product's existing flat config; do not blanket-replace it.
+// Complexity budgets + cross-browser compat.
 //
-// Thresholds are HIGH (25) on purpose: a FLOOR, not a style nag. Proven on a real repo - at 15,
-// hand-written code (deslop-kit's scan(), cyclo 28 / cognitive 40) tripped, which erodes trust. 25
-// (~2x the common 15) fires only on genuinely tangled functions. A hit = review/refactor the hotspot
-// or raise it for that one file WITH a written reason; never blanket-disable (that is itself a tell).
+// Thresholds are HIGH (25) on purpose: a FLOOR, not a style nag. Measured before it was set - at
+// 15, ordinary hand-written code (a scanner with cyclo 28 / cognitive 40) tripped, and a gate that
+// fires on healthy code stops being read. 25 (~2x the common 15) fires only on genuinely tangled
+// functions. A hit = review/refactor the hotspot or raise it for that one file WITH a written
+// reason; never blanket-disable, which turns the floor off without saying so.
 import sonarjs from 'eslint-plugin-sonarjs';
 import compat from 'eslint-plugin-compat';
 import tseslint from 'typescript-eslint';

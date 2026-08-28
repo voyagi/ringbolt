@@ -4,23 +4,22 @@
 // WHY THIS EXISTS
 // "No API keys in the client" is too blunt to be a gate. Supabase anon keys and Firebase web keys
 // are PUBLIC by design - a generic secret scanner false-flags them - while a Supabase service_role
-// key or a metered provider key (OpenAI/Anthropic/Stripe secret) in the client is a real, billable
-// breach. The r/vibecoding "I hacked vibe coded websites" thread and its top comments turned on
-// exactly this distinction. A prompt line telling the model "do not ship secrets" cannot fail a
-// build; this can, and it only fires on the keys that actually matter.
+// key or a metered provider secret in the client is a real, billable breach. Tuning a generic
+// scanner down until it stops false-flagging the public keys is how the true findings get lost, so
+// this gate decodes the key instead of pattern-matching it, and only fires on the ones that can
+// actually be spent.
 //
 // A ZERO-FINDING RESULT IS ONLY MEANINGFUL IF THE SCAN ACTUALLY RAN. If no built client bundle
 // exists (not built yet, or an output dir this gate does not know), it exits 2 (UNKNOWN), never 0.
 // A missing dist read as "clean" is the silent false-clean this gate exists to prevent.
 //
-// Usage (paths are the PRODUCT repo's, where this file is installed as scripts/check-client-secrets.mjs
-// alongside its mutants harness - the harness resolves this gate from beside itself):
-//   node scripts/check-client-secrets.mjs [dir ...]   scan built client output (auto-detects if omitted)
-//   node scripts/check-client-secrets.mjs --selftest  prove the gate still fires (isolated controls)
+// Usage (its mutants harness sits beside it and resolves this gate from there):
+//   node scripts/vendor/check-client-secrets.mjs [dir ...]   scan built client output
+//   node scripts/vendor/check-client-secrets.mjs --selftest  prove the gate still fires
 //
-// WIRING: verify:ship, AFTER the build step. NOT `npm run gate`. That chain also runs at pre-commit,
-// where no bundle exists, so this would correctly report UNKNOWN and fail every commit - and a gate
-// that blocks every commit gets deleted within a day. It is the same shape as the a11y-live gate.
+// It runs in CI after the build step rather than inside `npm run gate`. That chain also runs at
+// pre-commit, where no bundle exists, so this would correctly report UNKNOWN and fail every commit,
+// and a gate that blocks every commit gets deleted within a day. Same shape as the a11y-live gate.
 //
 // Exit codes: 0 clean, 1 secret in client bundle, 2 the scan could not run.
 
@@ -29,8 +28,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Default client build-output dirs across the stacks this pipeline ships (Vite, Astro, Next
-// export, SvelteKit static, CRA, Nuxt). Client assets land in one of these.
+// Default client build-output dirs across the common stacks (Vite, Astro, Next export, SvelteKit
+// static, CRA, Nuxt). Ringbolt is the first of these, and the rest cost nothing to keep.
 // `.next/static` is the client-served half of a NOT-exported Next.js app, which `out` (next export)
 // does not cover and which auto-detect therefore used to miss entirely. Auto-detect is still a
 // convenience, never a guarantee: a monorepo (packages/web/dist) or any custom outDir will not be

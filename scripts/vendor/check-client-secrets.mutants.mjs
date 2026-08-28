@@ -3,10 +3,10 @@
 //
 // Each mutation disables exactly ONE rule of check-client-secrets.mjs; the gate's own --selftest
 // must then go RED. A mutation that leaves --selftest GREEN is an ESCAPE: it means the control
-// named after that rule asserts nothing, which is the "a passing suite proved nothing" failure the
-// scaffold-gates carry mutant harnesses to catch. This file exits non-zero on any escape.
+// named after that rule asserts nothing, which is the "a passing suite proved nothing" failure this
+// harness exists to catch. This file exits non-zero on any escape.
 //
-// Usage:  node scripts/check-client-secrets.mutants.mjs
+// Usage:  node scripts/vendor/check-client-secrets.mutants.mjs
 // Exit codes: 0 all mutations caught, 1 an escape, 2 baseline gate selftest is not green.
 
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -131,9 +131,9 @@ const MUTATIONS = [
 // A MUTANT THAT DOES NOT PARSE IS NOT A MUTATION TEST, and nothing downstream can tell the two
 // apart: node exits non-zero on a SyntaxError exactly as it does on a caught mutation, so a file
 // that never executed a single control would score as CAUGHT and inflate the one number this
-// harness exists to produce. Borrowed from check-ship-artifacts.mutants.mjs, which arrived at it
-// first and by measurement. It is strictly better than inferring a crash from how many controls
-// ran: that is a proxy, this is the actual question, and it names the syntax error in the report
+// harness exists to produce. Checking the parse directly is strictly better than inferring a crash
+// from how many controls ran: that is a proxy, this is the actual question, and it names the
+// syntax error in the report
 // so the fix is obvious. The control-count check below still runs, for a mutant that PARSES and
 // then dies at runtime, which this cannot see.
 function parseError(file) {
