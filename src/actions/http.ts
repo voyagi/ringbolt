@@ -5,6 +5,7 @@ import {
   type JsonValue,
   type ParameterValue,
   actionUrlProblem,
+  canonicalHost,
 } from "./definition.js";
 
 type Values = Readonly<Record<string, ParameterValue>>;
@@ -282,7 +283,7 @@ function urlProblem(url: string, context: ActionContext): string | null {
   if (structural !== null) return `the url ${structural}`;
 
   if (context.allowedHosts === null) return null;
-  const host = new URL(url).hostname.toLowerCase();
+  const host = canonicalHost(new URL(url).hostname);
   if (context.allowedHosts.includes(host)) return null;
   return `this deployment may not call ${host}. Names it may call go in ACTION_HOST_ALLOWLIST.`;
 }

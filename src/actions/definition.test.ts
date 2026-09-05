@@ -91,6 +91,39 @@ describe("the urls an action may call", () => {
     expect(actionUrlProblem("https://vault/")).toContain("public host");
   });
 
+  /**
+   * The same names with the DNS root dot on the end, which resolve to exactly the same machines.
+   *
+   * Every hostile case above is written in its bare form, so the suite could not see that the dot
+   * walked straight through: it satisfies the public-name test on its own and it moves the end of
+   * the string past every private-name match. "metadata.google.internal." is the one that turns a
+   * runbook action into a credential leak.
+   */
+  it("refuses those names with the dns root dot on the end", () => {
+    expect(actionUrlProblem("https://localhost./go")).toContain("public host");
+    expect(actionUrlProblem("https://metadata.google.internal./")).toContain(
+      "private host",
+    );
+    expect(actionUrlProblem("https://printer.local./")).toContain("private");
+    expect(actionUrlProblem("https://box.internal./")).toContain("private");
+    expect(actionUrlProblem("https://vault./")).toContain("public host");
+  });
+
+  /**
+   * A name that is genuinely callable stays callable with the dot, and reports the same host either
+   * way. The allowlist is compared by exact string, so a host that canonicalised differently here
+   * than in the configuration would be refused for a reason nobody could see.
+   */
+  it("reads one host name whether or not the root dot is written", () => {
+    expect(actionUrlProblem("https://deploy.example.com./restart")).toBeNull();
+    expect(actionHost("https://deploy.example.com./restart")).toBe(
+      "deploy.example.com",
+    );
+    expect(actionHost("https://DEPLOY.Example.COM/restart")).toBe(
+      "deploy.example.com",
+    );
+  });
+
   it("refuses credentials in the url and a port that is not the https one", () => {
     expect(actionUrlProblem("https://user:pass@deploy.example.com/")).toContain(
       "credentials",

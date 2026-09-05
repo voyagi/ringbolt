@@ -312,13 +312,30 @@ export function actionUrlProblem(template: string): string | null {
 /** The host a url template names, or null when it does not name one that can be called. */
 export function actionHost(template: string): string | null {
   if (actionUrlProblem(template) !== null) return null;
-  return new URL(
-    template.replace(placeholder, PLACEHOLDER_PROBE),
-  ).hostname.toLowerCase();
+  return canonicalHost(
+    new URL(template.replace(placeholder, PLACEHOLDER_PROBE)).hostname,
+  );
+}
+
+/**
+ * A host name as everything here reads it: lower case, and without the DNS root dot.
+ *
+ * The trailing dot is the reason this exists rather than a bare toLowerCase. A name written
+ * `localhost.` or `metadata.google.internal.` resolves to exactly what its bare form resolves to,
+ * but the dot on the end satisfied the public-name test on its own and moved the end of the string
+ * past every private-name match below, so both walked through a guard whose whole purpose is to
+ * refuse them. Every hostile case in the suite was written bare, so nothing could see it.
+ *
+ * It is also the normalisation the allowlist has to use. The allowlist is compared by exact string,
+ * so a name canonicalised one way here and another way in the configuration is a host refused for a
+ * reason nobody reading either of them could work out.
+ */
+export function canonicalHost(hostname: string): string {
+  return hostname.toLowerCase().replace(/\.+$/, "");
 }
 
 function hostProblem(hostname: string): string | null {
-  const host = hostname.toLowerCase();
+  const host = canonicalHost(hostname);
   if (host.startsWith("[")) return "must not be an address literal";
   if (/^[0-9.]+$/.test(host)) return "must not be an address literal";
   if (!host.includes(".") || host.length > 253)

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { actionUrlProblem } from "../actions/definition.js";
+import { actionUrlProblem, canonicalHost } from "../actions/definition.js";
 import { fakeScenarioKinds } from "../calle/fake.js";
 import { phoneNumber } from "../domain/rotation.js";
 
@@ -217,7 +217,7 @@ export function allowedActionHosts(
   if (configured === undefined) {
     return config.RINGBOLT_ENV === "development" ? null : [];
   }
-  return splitList(configured).map((host) => host.toLowerCase());
+  return splitList(configured).map(canonicalHost);
 }
 
 /**
