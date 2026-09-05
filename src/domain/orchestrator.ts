@@ -726,11 +726,24 @@ export class Orchestrator {
   private async placeAndRecover(
     request: PlaceCallInput,
   ): Promise<CallSnapshot> {
+    let reachedTheWire: unknown;
     try {
       return await this.deps.placer.place(request);
     } catch (error) {
       if (error instanceof CallNotAttemptedError) throw error;
-      return this.deps.placer.place(request);
+      reachedTheWire = error;
+    }
+
+    try {
+      return await this.deps.placer.place(request);
+    } catch (error) {
+      // The second send being refused does not un-send the first one. The guards run again on the
+      // way in, so a concurrent call that took the last of the credit or filled the rate window in
+      // between makes this a CallNotAttemptedError, and reporting that one would say nothing
+      // reached the provider when something did: the call goes uncounted and a person is told there
+      // is nothing to look for. The first failure is the one that classifies this attempt.
+      if (error instanceof CallNotAttemptedError) throw reachedTheWire;
+      throw error;
     }
   }
 
@@ -752,7 +765,7 @@ export class Orchestrator {
     const reported =
       error instanceof Error ? error.message : "the call could not be placed";
     const detail = sent
-      ? `${reported}. It was sent twice with the same idempotency key and neither answered, so a call may exist that Ringbolt cannot see. Check the CALL-E dashboard before trying again.`
+      ? `${reported}. That attempt reached CALL-E and was never settled, so a call may exist that Ringbolt cannot see and never learned the id of. Check the CALL-E dashboard before trying again.`
       : reported;
     const at = this.deps.now().toISOString();
     const state = transition(incident.state, "failed");

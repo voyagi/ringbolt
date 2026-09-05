@@ -80,14 +80,21 @@ export type CalleApiStub = {
    */
   dropAnswers(count: number): void;
   /**
-   * Answer the next n creates with an error status instead of making a call.
+   * Answer the next n creates with an error status instead of making a call. The request is still
+   * recorded in `creates`, because it was sent; what does not happen is the call task, which is what
+   * the status means: CALL-E read the request and decided against it. Their validator refused the
+   * first real go-live attempt this way, with "who should the bot say is calling in the opening
+   * sentence?", so it is a shape this adapter meets rather than one invented for a test.
    *
-   * Nothing is stored, because that is what the status means: CALL-E read the request and decided
-   * against it. Their validator refused the first real go-live attempt this way, with "who should
-   * the bot say is calling in the opening sentence?", so it is a shape this adapter meets rather
-   * than one invented for a test.
+   * `after` lets the refusals start later than the next create, which is how the case where one
+   * send reaches the wire and the retry is refused gets expressed at all.
    */
-  rejectCreates(count: number, status: number, code: string): void;
+  rejectCreates(
+    count: number,
+    status: number,
+    code: string,
+    after?: number,
+  ): void;
 };
 
 export function calleApiStub(): CalleApiStub {
@@ -96,7 +103,7 @@ export function calleApiStub(): CalleApiStub {
   const creates: RecordedCreate[] = [];
   let placed = 0;
   let answersToDrop = 0;
-  let rejections = { count: 0, status: 422, code: "invalid_request" };
+  let rejections = { count: 0, status: 422, code: "invalid_request", after: 0 };
 
   async function create(request: Request): Promise<Response> {
     const body = (await request.json()) as Record<string, unknown>;
@@ -108,7 +115,9 @@ export function calleApiStub(): CalleApiStub {
     });
 
     // Before anything is stored, because a refused create is one that made no call task at all.
-    if (rejections.count > 0) {
+    if (rejections.after > 0) {
+      rejections = { ...rejections, after: rejections.after - 1 };
+    } else if (rejections.count > 0) {
       rejections = { ...rejections, count: rejections.count - 1 };
       return apiError(
         rejections.status,
@@ -152,8 +161,8 @@ export function calleApiStub(): CalleApiStub {
     dropAnswers(count) {
       answersToDrop = count;
     },
-    rejectCreates(count, status, code) {
-      rejections = { count, status, code };
+    rejectCreates(count, status, code, after = 0) {
+      rejections = { count, status, code, after };
     },
     settle(callId, patch) {
       const call = calls.get(callId);

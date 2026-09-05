@@ -329,6 +329,36 @@ describe("the loop running on the CALL-E adapter", () => {
   });
 
   /**
+   * The first send reached the wire and was never settled; the retry was refused before it went
+   * anywhere. Both guards run again on the way in, so a concurrent call that took the last of the
+   * credit or filled the rate window in between makes the second failure a refusal.
+   *
+   * The refusal does not un-send the first attempt. Reading only the final error would report that
+   * nothing reached CALL-E, leave the possibly-billed call uncounted, and send a person looking for
+   * nothing. Here the retry is refused outright by CALL-E, which is the same class of error a guard
+   * raises and is a shape the stub can produce.
+   */
+  it("still counts the first send when the retry is refused", async () => {
+    const api = calleApiStub();
+    api.dropAnswers(1);
+    api.rejectCreates(1, 422, "invalid_request", 1);
+
+    const result = await liveOrchestrator(api).open(alert);
+
+    expect(result.kind).toBe("call_failed");
+    expect(api.creates).toHaveLength(2);
+    expect(api.ids()).toHaveLength(1);
+    expect(result.incident.outcome).toBe("call_outcome_unknown");
+
+    const repo = new Repo(env.DB);
+    expect(await repo.countRealCalls()).toBe(1);
+    const failure = (await repo.listEvents(result.incident.id)).find(
+      (event) => event.kind === "call.place_failed",
+    );
+    expect(failure?.data).toMatchObject({ reachedTheProvider: true });
+  });
+
+  /**
    * The boundary the rule above is drawn at, pinned rather than described. A refusal for rate is not
    * the same as a refusal on the merits: it can arrive after the request was taken in, so whether a
    * task exists is the one thing nobody can answer, and a maybe is read as a yes by everything that
