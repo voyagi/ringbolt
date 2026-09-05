@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { CALL_PRICE_USD } from "../src/calle/port.js";
 import { verifyCall } from "../src/calle/verify.js";
-import { Repo } from "../src/db/repo.js";
+import { Repo, SHARED_ROTATION } from "../src/db/repo.js";
 import type { AlertPayload } from "../src/domain/incident.js";
 import { readConfig } from "../src/worker/env.js";
 import {
@@ -60,6 +60,20 @@ const alert: AlertPayload = {
   title: "Payment errors above 20 percent",
   severity: "critical",
 };
+
+/**
+ * What the Durable Object's section does, in one isolate: run the callbacks one at a time. Held by
+ * the tests that put two triggers on one incident, so that what they measure is the race the
+ * section is supposed to close rather than the absence of a section.
+ */
+function oneAtATime() {
+  let tail: Promise<unknown> = Promise.resolve();
+  return <T>(work: () => Promise<T>): Promise<T> => {
+    const result = tail.then(work, work);
+    tail = result.catch(() => undefined);
+    return result;
+  };
+}
 
 function liveOrchestrator(api: CalleApiStub) {
   return buildOrchestrator(env, readConfig(LIVE_ENV), {
@@ -264,6 +278,157 @@ describe("the loop running on the CALL-E adapter", () => {
     const failure = events.find((event) => event.kind === "call.place_failed");
     expect(failure?.message).toContain("a call may exist");
     expect(failure?.data).toMatchObject({ reachedTheProvider: true });
+  });
+
+  /**
+   * The same case, counted rather than described. A call task exists on their side, so it is billed
+   * whether or not the answer reached us, and the ledger is what both spending guards read: the
+   * credit ceiling and the ten minute rate limit. Leaving this uncounted makes both of them blind in
+   * the one failure mode that emptied the balance on 2026-08-22, because a provider answering slowly
+   * fails this way for every call at once and the rate limit never sees a single one of them.
+   */
+  it("counts a call that may exist against the credit and the rate limit", async () => {
+    const api = calleApiStub();
+    api.dropAnswers(2);
+
+    const result = await liveOrchestrator(api).open(alert);
+    expect(result.kind).toBe("call_failed");
+    expect(api.ids()).toHaveLength(1);
+
+    const repo = new Repo(env.DB);
+    expect(await repo.countRealCalls()).toBe(1);
+    expect(await repo.countRealCallsSince("2026-08-21T00:00:00.000Z")).toBe(1);
+  });
+
+  /**
+   * The other half of the same question, and the reason the answer is not simply "count everything
+   * that reached the wire". CALL-E validated the first real go-live attempt and refused it with
+   * "who should the bot say is calling in the opening sentence?". That is their decision not to make
+   * a call, so nothing exists, nothing was billed, and sending it a second time only asks a
+   * validator that has already answered. Counting it would spend the credit on calls nobody made and
+   * then refuse the real ones, which on an on-call tool is the telephone quietly going dead.
+   */
+  it("does not re-send or count a call CALL-E refused outright", async () => {
+    const api = calleApiStub();
+    api.rejectCreates(5, 422, "invalid_request");
+
+    const result = await liveOrchestrator(api).open(alert);
+
+    expect(result.kind).toBe("call_failed");
+    expect(api.creates).toHaveLength(1);
+    expect(api.ids()).toHaveLength(0);
+
+    const repo = new Repo(env.DB);
+    expect(await repo.countRealCalls()).toBe(0);
+
+    const failure = (await repo.listEvents(result.incident.id)).find(
+      (event) => event.kind === "call.place_failed",
+    );
+    expect(failure?.data).toMatchObject({ reachedTheProvider: false });
+    expect(failure?.message).not.toContain("a call may exist");
+  });
+
+  /**
+   * The first send reached the wire and was never settled; the retry was refused before it went
+   * anywhere. Both guards run again on the way in, so a concurrent call that took the last of the
+   * credit or filled the rate window in between makes the second failure a refusal.
+   *
+   * The refusal does not un-send the first attempt. Reading only the final error would report that
+   * nothing reached CALL-E, leave the possibly-billed call uncounted, and send a person looking for
+   * nothing. Here the retry is refused outright by CALL-E, which is the same class of error a guard
+   * raises and is a shape the stub can produce.
+   */
+  it("still counts the first send when the retry is refused", async () => {
+    const api = calleApiStub();
+    api.dropAnswers(1);
+    api.rejectCreates(1, 422, "invalid_request", 1);
+
+    const result = await liveOrchestrator(api).open(alert);
+
+    expect(result.kind).toBe("call_failed");
+    expect(api.creates).toHaveLength(2);
+    expect(api.ids()).toHaveLength(1);
+    expect(result.incident.outcome).toBe("call_outcome_unknown");
+
+    const repo = new Repo(env.DB);
+    expect(await repo.countRealCalls()).toBe(1);
+    const failure = (await repo.listEvents(result.incident.id)).find(
+      (event) => event.kind === "call.place_failed",
+    );
+    expect(failure?.data).toMatchObject({ reachedTheProvider: true });
+  });
+
+  /**
+   * The boundary the rule above is drawn at, pinned rather than described. A refusal for rate is not
+   * the same as a refusal on the merits: it can arrive after the request was taken in, so whether a
+   * task exists is the one thing nobody can answer, and a maybe is read as a yes by everything that
+   * spends money here.
+   */
+  it("treats a rate refusal as a call that may exist", async () => {
+    const api = calleApiStub();
+    api.rejectCreates(5, 429, "rate_limited");
+
+    const result = await liveOrchestrator(api).open(alert);
+
+    expect(result.kind).toBe("call_failed");
+    expect(api.creates).toHaveLength(2);
+    expect(await new Repo(env.DB).countRealCalls()).toBe(1);
+  });
+
+  /**
+   * Two triggers can decide to escalate one incident at the same moment: the incident's own alarm
+   * and the reconciliation sweep that backs it up. The incident is claimed into `calling` inside the
+   * exclusive section so that the second one finds it already claimed and stops.
+   *
+   * The section is held here exactly as the Durable Object holds it, which is the point: the state
+   * each trigger claims from is read BEFORE the section, so holding the section is not on its own
+   * enough. A second create with the same idempotency key is the only thing between this and two
+   * telephones ringing about one problem, and that key is computed from the same stale read.
+   */
+  it("places one call when two triggers escalate at the same moment", async () => {
+    const repo = new Repo(env.DB);
+    for (const id of ["con_first", "con_second"]) {
+      await repo.createContact({
+        id,
+        name: id,
+        // Both on the configured number, which is the only one this build may dial.
+        phone: "+31612345678",
+        createdAt: "2026-08-21T09:00:00.000Z",
+      });
+    }
+    await repo.setRotation(SHARED_ROTATION, ["con_first", "con_second"]);
+
+    const api = calleApiStub();
+    const orchestrator = buildOrchestrator(env, readConfig(LIVE_ENV), {
+      scheduler: immediateScheduler,
+      exclusive: oneAtATime(),
+      wake: unscheduledWakes,
+      calleFetch: api.fetch,
+    });
+
+    const opened = await orchestrator.open(alert);
+    if (opened.kind !== "created") throw new Error("the incident was not made");
+    expect(api.creates).toHaveLength(1);
+
+    await repo.updateIncident(
+      opened.incident.id,
+      { state: "escalating" },
+      "2026-08-21T12:05:00.000Z",
+    );
+
+    await Promise.all([
+      orchestrator.escalate(opened.incident.id),
+      orchestrator.escalate(opened.incident.id),
+    ]);
+
+    // The first call and one escalation. A third create is the second trigger dialling as well.
+    expect(api.creates).toHaveLength(2);
+    expect(api.ids()).toHaveLength(2);
+
+    const placed = (await repo.listEvents(opened.incident.id)).filter(
+      (event) => event.kind === "call.placed",
+    );
+    expect(placed).toHaveLength(2);
   });
 
   /**

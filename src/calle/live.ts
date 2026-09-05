@@ -1,4 +1,9 @@
-import { type Call, CalleClient, type CalleClientOptions } from "@call-e/calle";
+import {
+  type Call,
+  CalleAPIError,
+  CalleClient,
+  type CalleClientOptions,
+} from "@call-e/calle";
 import {
   BURST_WINDOW_MINUTES,
   CALL_PRICE_USD,
@@ -66,6 +71,46 @@ export class CallBurstError extends CallNotAttemptedError {
   }
 }
 
+/**
+ * CALL-E read the request, decided against it, and said so. Their own considered refusal, so no call
+ * task was created, nothing was billed, and nobody's telephone is ringing.
+ *
+ * It is a CallNotAttemptedError for both halves of what that type means here. Nothing is re-sent: a
+ * request they have already judged invalid is judged the same way the second time, and the first
+ * real go-live attempt was refused with "who should the bot say is calling in the opening sentence?"
+ * and re-sent for nothing. And nothing is counted as spent: reporting "a call may exist, check the
+ * CALL-E dashboard" about a call they told us they did not make sends somebody looking for it.
+ *
+ * 408 and 429 are deliberately outside this. A request that timed out on their side, or was refused
+ * for rate after being taken in, is one where "did a call task get made" is exactly the question
+ * nobody can answer, and the safe reading of a maybe is that it did.
+ */
+export class CallRejectedError extends CallNotAttemptedError {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "CallRejectedError";
+  }
+}
+
+/**
+ * Whether CALL-E answered with a decision not to create the call, as opposed to a failure that may
+ * have left one behind. Only their own 4xx counts, because that is a considered refusal with a
+ * response body behind it; a timeout, a connection failure or a 5xx is a maybe, and 408 and 429 are
+ * excluded for the same reason. Everything that spends money here reads a maybe as a yes.
+ */
+function rejectedOutright(error: unknown): error is CalleAPIError {
+  return (
+    error instanceof CalleAPIError &&
+    error.status >= 400 &&
+    error.status < 500 &&
+    error.status !== 408 &&
+    error.status !== 429
+  );
+}
+
 export class NumberNotAllowedError extends CallNotAttemptedError {
   constructor() {
     // Deliberately does not repeat the number. This message reaches an audit record and an HTTP
@@ -131,22 +176,30 @@ export class LiveCallPlacer implements CallPlacer {
     const recent = await this.budget.placedSince(windowOpened);
     if (recent >= MAX_CALLS_PER_BURST_WINDOW) throw new CallBurstError(recent);
 
-    const call = await this.calle.calls.create(
-      {
-        task: input.task,
-        recipient: {
-          phone: input.phone,
-          locale: this.locale,
-          region: this.region,
+    try {
+      const call = await this.calle.calls.create(
+        {
+          task: input.task,
+          recipient: {
+            phone: input.phone,
+            locale: this.locale,
+            region: this.region,
+          },
+          resultSchema: input.resultSchema,
+          metadata: input.metadata,
+          webhookUrl: input.webhookUrl,
         },
-        resultSchema: input.resultSchema,
-        metadata: input.metadata,
-        webhookUrl: input.webhookUrl,
-      },
-      { idempotencyKey: input.idempotencyKey },
-    );
+        { idempotencyKey: input.idempotencyKey },
+      );
 
-    return toSnapshot(call);
+      return toSnapshot(call);
+    } catch (error) {
+      // Their refusal is turned into ours here, at the line that knows what the SDK throws, so that
+      // nothing further out has to know about HTTP status codes to tell a refusal from a maybe.
+      if (rejectedOutright(error))
+        throw new CallRejectedError(error.status, error.message);
+      throw error;
+    }
   }
 
   /**
