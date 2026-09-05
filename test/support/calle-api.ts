@@ -105,6 +105,12 @@ export function calleApiStub(): CalleApiStub {
   let answersToDrop = 0;
   let rejections = { count: 0, status: 422, code: "invalid_request", after: 0 };
 
+  /**
+   * POST /v1/calls, answered the way the real API answers it. Records what went onto the wire, then
+   * behaves as they do: a repeated idempotency key returns the call already made rather than
+   * dialling again, and whichever failure a test asked for is raised at the point the real one
+   * would be, which for a dropped answer is after the call task exists.
+   */
   async function create(request: Request): Promise<Response> {
     const body = (await request.json()) as Record<string, unknown>;
     const idempotencyKey = request.headers.get("Idempotency-Key");
