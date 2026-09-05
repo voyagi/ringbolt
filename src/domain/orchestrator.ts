@@ -617,6 +617,16 @@ export class Orchestrator {
     return this.dial(claimed.incident, contact, offered, attempt, deadline);
   }
 
+  /**
+   * The line that actually rings a telephone, once the incident has been claimed.
+   *
+   * Everything before this decided whether to call and who to call. This builds the request, sends
+   * it, and writes down what happened, in that order for a reason: the call id goes onto the
+   * incident first so a delivery arriving immediately can find it, then the audit trail, then the
+   * ledger row that both spending guards count. A failure closes the incident rather than leaving
+   * it open, because an open incident answers every later repeat of the same alert as a duplicate
+   * and the service goes quiet.
+   */
   private async dial(
     incident: Incident,
     contact: Contact,
