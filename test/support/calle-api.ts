@@ -79,6 +79,15 @@ export type CalleApiStub = {
    * that treats it as "no call was made" and sends again with a fresh key gets billed twice.
    */
   dropAnswers(count: number): void;
+  /**
+   * Answer the next n creates with an error status instead of making a call.
+   *
+   * Nothing is stored, because that is what the status means: CALL-E read the request and decided
+   * against it. Their validator refused the first real go-live attempt this way, with "who should
+   * the bot say is calling in the opening sentence?", so it is a shape this adapter meets rather
+   * than one invented for a test.
+   */
+  rejectCreates(count: number, status: number, code: string): void;
 };
 
 export function calleApiStub(): CalleApiStub {
@@ -87,6 +96,7 @@ export function calleApiStub(): CalleApiStub {
   const creates: RecordedCreate[] = [];
   let placed = 0;
   let answersToDrop = 0;
+  let rejections = { count: 0, status: 422, code: "invalid_request" };
 
   async function create(request: Request): Promise<Response> {
     const body = (await request.json()) as Record<string, unknown>;
@@ -96,6 +106,16 @@ export function calleApiStub(): CalleApiStub {
       idempotencyKey,
       authorization: request.headers.get("authorization"),
     });
+
+    // Before anything is stored, because a refused create is one that made no call task at all.
+    if (rejections.count > 0) {
+      rejections = { ...rejections, count: rejections.count - 1 };
+      return apiError(
+        rejections.status,
+        rejections.code,
+        "CALL-E refused this call task.",
+      );
+    }
 
     // The real API answers a repeated key with the call it already made rather than dialling
     // again, which is the property that stops a retry becoming a second telephone ringing.
@@ -131,6 +151,9 @@ export function calleApiStub(): CalleApiStub {
     ids: () => [...calls.keys()],
     dropAnswers(count) {
       answersToDrop = count;
+    },
+    rejectCreates(count, status, code) {
+      rejections = { count, status, code };
     },
     settle(callId, patch) {
       const call = calls.get(callId);

@@ -570,7 +570,13 @@ export class Orchestrator {
 
     const claimed = await this.deps.exclusive(async () => {
       const found = await this.deps.repo.getIncident(incident.id);
-      if (found === null || found.state !== incident.state) return found;
+      // Whether THIS caller made the claim, not what state the incident ended up in. Those are not
+      // the same question, and reading the state instead is how a second trigger got through: the
+      // state somebody else moves it to is `calling`, so a guard asking "is it calling?" passes at
+      // exactly the moment it is supposed to stop. Two triggers escalating one incident at the same
+      // moment is the ordinary case here, the alarm and the sweep, and both of them dialled.
+      if (found === null || found.state !== incident.state)
+        return { mine: false as const, incident: found };
 
       const state = transition(found.state, "calling");
       const at = startedAt.toISOString();
@@ -590,22 +596,25 @@ export class Orchestrator {
         at,
       );
       return {
-        ...found,
-        state,
-        callId: null,
-        offeredActions,
-        callAttempts: attempt,
-        rotationPosition,
-        contactId: contact.id,
-        callStartedAt: at,
-        updatedAt: at,
+        mine: true as const,
+        incident: {
+          ...found,
+          state,
+          callId: null,
+          offeredActions,
+          callAttempts: attempt,
+          rotationPosition,
+          contactId: contact.id,
+          callStartedAt: at,
+          updatedAt: at,
+        },
       };
     });
 
-    if (claimed === null || claimed.state !== "calling")
-      return { kind: "already_moved", incident: claimed ?? incident };
+    if (!claimed.mine)
+      return { kind: "already_moved", incident: claimed.incident ?? incident };
 
-    return this.dial(claimed, contact, offered, attempt, deadline);
+    return this.dial(claimed.incident, contact, offered, attempt, deadline);
   }
 
   private async dial(
@@ -630,6 +639,7 @@ export class Orchestrator {
     try {
       call = await this.placeAndRecover(request);
     } catch (error) {
+      await this.countUnsettledCall(request, incident.id, error);
       const failed = await this.callCouldNotBePlaced(incident, error);
       return {
         kind: "failed",
@@ -662,6 +672,40 @@ export class Orchestrator {
       kind: "placed",
       incident: { ...incident, callId: call.id, updatedAt: at },
     };
+  }
+
+  /**
+   * Writes down a call that may have been created even though we never got its id.
+   *
+   * CALL-E bills per call task CREATED, and both of the guards that stop this product spending read
+   * the same ledger: the credit ceiling and the ten minute rate limit. A create whose answer never
+   * arrived may already have cost five cents and may already be ringing somebody, so counting it as
+   * nothing makes both guards blind in the exact failure mode that emptied the balance on
+   * 2026-08-22, and blind for every call at once: a provider answering too slowly fails this way
+   * for all of them, so the rate limit would never see a single one.
+   *
+   * The id is made up from the idempotency key rather than left out, so it is stable: the same
+   * attempt failing again writes the same row, and `INSERT OR IGNORE` keeps it at one. It cannot
+   * collide with a real CALL-E id, which is the point of the prefix.
+   *
+   * A refusal raised before anything went onto the wire is not counted, and neither is one CALL-E
+   * itself rejected: both mean no task exists. That is the same line `callCouldNotBePlaced` draws,
+   * on purpose, so the money counted and the record a person reads never disagree.
+   */
+  private async countUnsettledCall(
+    request: PlaceCallInput,
+    incidentId: string,
+    error: unknown,
+  ): Promise<void> {
+    if (this.deps.placer.kind !== "live") return;
+    if (error instanceof CallNotAttemptedError) return;
+
+    await this.deps.repo.recordRealCall(
+      `unsettled:${request.idempotencyKey}`,
+      incidentId,
+      this.deps.now().toISOString(),
+      "live",
+    );
   }
 
   /**
