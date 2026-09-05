@@ -95,6 +95,12 @@ export class CallRejectedError extends CallNotAttemptedError {
   }
 }
 
+/**
+ * Whether CALL-E answered with a decision not to create the call, as opposed to a failure that may
+ * have left one behind. Only their own 4xx counts, because that is a considered refusal with a
+ * response body behind it; a timeout, a connection failure or a 5xx is a maybe, and 408 and 429 are
+ * excluded for the same reason. Everything that spends money here reads a maybe as a yes.
+ */
 function rejectedOutright(error: unknown): error is CalleAPIError {
   return (
     error instanceof CalleAPIError &&
