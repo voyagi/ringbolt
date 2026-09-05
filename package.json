@@ -75,7 +75,10 @@
   },
   "overrides": {
     "typed-rest-client": {
-      "qs": "^6.15.3"
+      "qs": "^6.16.0"
+    },
+    "ajv": {
+      "fast-uri": "^3.1.6"
     }
   }
 }
