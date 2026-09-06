@@ -67,11 +67,9 @@ async function resolve(incidentId: string): Promise<void> {
     { timeout: 5000, interval: 25 },
   );
 
-  await buildOrchestrator(env, readConfig(env), {
-    scheduler: immediateScheduler,
-    exclusive: (work) => work(),
-    wake: unscheduledWakes,
-  }).onCallTerminal({
+  // Branded the way verifyCall brands a checked API response: a CallSnapshot, then the cast. The
+  // test writes the snapshot itself, so nothing else can put the brand on it.
+  const snapshot: CallSnapshot = {
     id: `call_stub_${incidentId}`,
     status: "completed",
     taskCompleted: true,
@@ -87,7 +85,12 @@ async function resolve(incidentId: string): Promise<void> {
     ],
     metadata: { incident_id: incidentId, service: SERVICE },
     failureCode: null,
-  } as VerifiedCall);
+  };
+  await buildOrchestrator(env, readConfig(env), {
+    scheduler: immediateScheduler,
+    exclusive: (work) => work(),
+    wake: unscheduledWakes,
+  }).onCallTerminal(snapshot as VerifiedCall);
 }
 
 async function setPolicy(overrides: Partial<ServicePolicy>): Promise<void> {

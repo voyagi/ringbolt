@@ -26,8 +26,12 @@ const alert: AlertPayload = {
   severity: "critical",
 };
 
+/**
+ * Branded the way verifyCall brands a checked API response: a CallSnapshot, then the cast. The
+ * tests write the snapshot themselves, so nothing else can put the brand on it.
+ */
 function snapshotFor(incident: Incident, decision: unknown): VerifiedCall {
-  return {
+  const snapshot: CallSnapshot = {
     id: "call_stub",
     status: "completed",
     taskCompleted: true,
@@ -44,7 +48,8 @@ function snapshotFor(incident: Incident, decision: unknown): VerifiedCall {
     ],
     metadata: { incident_id: incident.id, service: incident.service },
     failureCode: null,
-  } as VerifiedCall;
+  };
+  return snapshot as VerifiedCall;
 }
 
 /** A placer that reports itself as the real one without dialling anything. */

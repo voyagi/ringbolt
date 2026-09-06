@@ -1,5 +1,6 @@
 import { SELF, env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { TranscriptTurn } from "../src/calle/port.js";
 import { Repo } from "../src/db/repo.js";
 import { resetTables } from "./support/reset.js";
 import { deliverWebhook, terminalCallFor } from "./support/webhook.js";
@@ -91,14 +92,13 @@ describe("a call where only Ringbolt could be heard", () => {
     const incidentId = await runOneCall();
 
     const [record] = await new Repo(env.DB).listCallRecords(incidentId);
-    expect(record?.transcript.length).toBeGreaterThan(0);
+    // The record keeps the transcript as parsed JSON, typed unknown. The stand-in wrote it in the
+    // adapter's shape, and the assertions below read it in that shape.
+    const turns = (record?.transcript ?? []) as TranscriptTurn[];
+    expect(turns.length).toBeGreaterThan(0);
+    expect(turns.filter((turn) => turn.speaker === "user")).not.toHaveLength(0);
     expect(
-      record?.transcript.filter((turn) => turn.speaker === "user"),
-    ).not.toHaveLength(0);
-    expect(
-      record?.transcript.every(
-        (turn) => turn.speaker !== "user" || turn.text === "",
-      ),
+      turns.every((turn) => turn.speaker !== "user" || turn.text === ""),
     ).toBe(true);
   });
 

@@ -6,11 +6,7 @@ import {
   FAULTY_RELEASE,
   HEALTHY_RELEASE,
 } from "../src/demo/service.js";
-import type {
-  ActionRunView,
-  DemoView,
-  SessionView,
-} from "../src/domain/view.js";
+import type { DemoView, SessionView } from "../src/domain/view.js";
 import { allowedActionHosts, readConfig } from "../src/worker/env.js";
 import { resetTables } from "./support/reset.js";
 import { deliverWebhook, terminalCallFor } from "./support/webhook.js";
