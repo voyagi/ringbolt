@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { Repo } from "../src/db/repo.js";
+import { type IncidentPatch, Repo } from "../src/db/repo.js";
 import type { Incident } from "../src/domain/incident.js";
 import {
   ConfigurationError,
@@ -264,9 +264,16 @@ describe("patching an incident", () => {
       .run();
     await repo.createIncident(incident);
 
+    // IncidentPatch forbids an explicit undefined on purpose, so a patch carrying one can only
+    // arrive from a value the type system never saw, a spread of untyped data. The test builds
+    // exactly that shape, which is why it goes through unknown rather than being typed as a patch.
+    const carriesUndefined = {
+      callAttempts: undefined,
+      outcome: "left alone",
+    } as unknown as IncidentPatch;
     await repo.updateIncident(
       incident.id,
-      { callAttempts: undefined, outcome: "left alone" },
+      carriesUndefined,
       "2026-08-21T12:02:00.000Z",
     );
 

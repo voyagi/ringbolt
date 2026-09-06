@@ -4,7 +4,7 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "types": ["node", "vite/client"],
+    "types": ["node", "vite/client", "@cloudflare/vitest-pool-workers/types"],
     "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -23,11 +23,14 @@
   "include": [
     "src",
     "scripts",
+    "test",
     "worker-configuration.d.ts",
     "*.config.ts",
     "*.config.mjs"
   ],
   // test/fault holds the fault-injection template. It needs a Toxiproxy server and two dev
   // dependencies that the attack pass installs, so it is excluded until that pass wires it up.
+  // The file carries a matching `tsconfig-coverage: ignore` marker, so the coverage gate reports
+  // the exclusion as deliberate instead of as a gap. Remove both together when the deps land.
   "exclude": ["node_modules", "dist", ".wrangler", "test/fault"]
 }

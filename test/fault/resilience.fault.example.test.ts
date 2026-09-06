@@ -1,3 +1,5 @@
+// tsconfig-coverage: ignore (excluded in tsconfig.json: cockatiel and toxiproxy-node-client are
+// not installed until the attack pass wires the fault job; drop this marker and the exclude then)
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "node:http";
 import { Toxiproxy } from "toxiproxy-node-client";
