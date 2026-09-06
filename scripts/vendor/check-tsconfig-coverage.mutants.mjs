@@ -64,6 +64,7 @@ const MUTATIONS = [
   { name: 'the marker window is five lines, not the whole file', expect: 'the marker only counts in the first five lines', find: 'const MARKER_LINES = 5;', repl: 'const MARKER_LINES = 50;' },
   { name: 'the --ignore glob is honoured', expect: 'an --ignore glob exempts matching paths', find: '  return patterns.some((re) => re.test(rel));', repl: '  return false;' },
   { name: 'a single star stays inside one directory', expect: 'an --ignore glob does not cross directories with a single star', find: "      else re += '[^/]*';", repl: "      else re += '.*';" },
+  { name: 'a globstar with a slash keeps its segment boundary', expect: 'a globstar followed by a slash keeps the path boundary', find: "        if (glob[i + 1] === '/') { re += '(?:.*/)?'; i++; } else re += '.*';", repl: "        if (glob[i + 1] === '/') { re += '.*'; i++; } else re += '.*';" },
 
   // --- rule 2: twins ---
   { name: 'a twin is named as a twin, not merely as uncovered', expect: 'a .tsx twin of a .ts is reported as dropped, not merely uncovered', find: '    const twin = twinOf.get(f);', repl: '    const twin = undefined;' },
@@ -81,6 +82,8 @@ const MUTATIONS = [
   { name: 'a non-repository is UNKNOWN, never clean', expect: 'a non-repository is UNKNOWN, not clean', find: '    return { unknown: true, reason: `not a git repository at ${cwd}`, findings: [] };', repl: '    return { ok: true, findings: [], advisories: [], tracked: 0, configs: 0, covered: 0 };' },
   { name: 'a missing compiler is UNKNOWN, never clean', expect: 'no resolvable TypeScript is UNKNOWN, not clean', find: '    return { unknown: true, reason: resolved.error, findings: [] };', repl: '    return { ok: true, findings: [], advisories: [], tracked: tsFiles.length, configs: configs.length, covered: 0 };' },
   { name: 'an unreadable tsconfig is UNKNOWN, never skipped', expect: 'an unreadable tsconfig is UNKNOWN, not clean', find: '    if (p.error) return { unknown: true, reason: `tsconfig unreadable, ${p.error}`, findings: [] };', repl: '    if (p.error) continue;' },
+  { name: 'a config with fatal diagnostics is UNKNOWN, never counted', expect: 'a tsconfig whose extends target is missing is UNKNOWN, not clean', find: '  if (fatal.length) {', repl: '  if (false) {' },
+  { name: 'a compiler without the API is UNKNOWN, never a crash', expect: 'a typescript package without the compiler API is UNKNOWN, not clean', find: '  if (missing.length) {', repl: '  if (false) {' },
 
   // --- exit codes ---
   { name: 'findings outrank incompleteness in the exit code', expect: 'an INCOMPLETE scan WITH findings exits 1, not 2', find: '    return (res.findings || []).length ? 1 : 2;', repl: '    return 2;' },
@@ -151,6 +154,7 @@ function controlsIn(out) {
   return map;
 }
 
+/** Runs the baseline selftest, then every selected mutation, and scores the harness. */
 async function main() {
   const argv = process.argv.slice(2);
   const onlyAt = argv.indexOf('--only');
@@ -159,6 +163,12 @@ async function main() {
   const jobs = jobsAt !== -1 ? Number(argv[jobsAt + 1]) : Math.max(2, Math.min(6, cpus().length - 2));
   if (onlyAt !== -1 && !only) {
     console.error('[mutants] --only needs a substring to match mutation names against.');
+    return 2;
+  }
+  // NaN here would build a pool with no workers and a sparse result list, and the scoring loop
+  // would then die on an undefined outcome having run no mutation at all.
+  if (jobsAt !== -1 && (!Number.isInteger(jobs) || jobs < 1)) {
+    console.error('[mutants] --jobs needs a positive integer, for example --jobs 4.');
     return 2;
   }
 
@@ -302,4 +312,6 @@ async function main() {
   return 0;
 }
 
-main().then((code) => process.exit(code), (e) => { console.error(e && e.stack || e); process.exit(2); });
+// exitCode rather than exit(): under CI capture the report's last lines can still be queued on
+// stdout when main resolves, and exit() would drop them.
+main().then((code) => { process.exitCode = code; }, (e) => { console.error(e && e.stack || e); process.exitCode = 2; });

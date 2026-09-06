@@ -79,14 +79,17 @@ function trackedFiles(root) {
 // work. Borrowing the compiler rather than re-implementing tsconfig semantics is the whole design:
 // a home-grown `include` matcher would drift from tsc the first time either changed, and the point
 // of this gate is to say what tsc will do.
-//
-// `from` is the PACKAGE directory, the one holding typescript's package.json, because that is what
-// the override branch loads from and what the selftest hands back in as the override. The first
-// version returned the directory of the resolved entry file instead, which is `lib/`: the Workshop
-// proved the selftest through TSCONFIG_COVERAGE_TS, where `from` is the override itself, and the
-// first product repo with its own compiler (ringbolt, 2026-09-06) had 16 of 28 controls come back
-// UNKNOWN with "Cannot find module './'". packageDirOf walks up from the entry file to the nearest
-// package.json that names typescript, so a nested `lib/` layout and a flat one both resolve.
+
+/**
+ * The PACKAGE directory of the resolved compiler, the one holding typescript's package.json,
+ * because that is what the override branch loads from and what the selftest hands back in as the
+ * override. The first version returned the directory of the resolved entry file instead, which is
+ * `lib/`: the Workshop proved the selftest through TSCONFIG_COVERAGE_TS, where `from` is the
+ * override itself, and the first product repo with its own compiler (ringbolt, 2026-09-06) had 16
+ * of 28 controls come back UNKNOWN with "Cannot find module './'". Walks up from the entry file to
+ * the nearest package.json that names typescript, so a nested `lib/` layout and a flat one both
+ * resolve.
+ */
 function packageDirOf(entry) {
   let dir = dirname(entry);
   for (;;) {
@@ -101,19 +104,41 @@ function packageDirOf(entry) {
   }
 }
 
+/**
+ * The four compiler calls programFiles makes, checked before any of them runs. A package that
+ * resolves as `typescript` but exposes a different API (a stub, a future major that moves the
+ * compiler API off its main entry) must read as UNKNOWN with a reason, not as a TypeError with a
+ * stack where the verdict should be.
+ */
+function usable(ts, from) {
+  const missing = [
+    ['readConfigFile', typeof ts?.readConfigFile],
+    ['parseJsonConfigFileContent', typeof ts?.parseJsonConfigFileContent],
+    ['sys.readFile', typeof ts?.sys?.readFile],
+    ['flattenDiagnosticMessageText', typeof ts?.flattenDiagnosticMessageText],
+  ].filter(([, type]) => type !== 'function').map(([name]) => name);
+  if (missing.length) {
+    return { error: `the resolved TypeScript ${ts?.version || '(no version)'} exposes no ${missing.join(', ')}` };
+  }
+  return { ts, from };
+}
+
+/** The repo's own compiler and its package directory, or an error naming why there is none. */
 function resolveTypescript(root, override) {
   try {
-    if (override) return { ts: createRequire(join(override, 'package.json'))('./'), from: override };
+    if (override) return usable(createRequire(join(override, 'package.json'))('./'), override);
     const req = createRequire(join(root, '__tsconfig_coverage_resolve__.js'));
     const entry = req.resolve('typescript');
-    return { ts: req(entry), from: packageDirOf(entry) };
+    return usable(req(entry), packageDirOf(entry));
   } catch (e) {
     return { error: `no TypeScript to resolve configs with (${(e && e.message || '').split('\n')[0]})` };
   }
 }
 
-// The file set of one tsconfig, as tsc would build it. Paths come back absolute with forward
-// slashes; they are made repo-relative and case-folded here so they compare against git's list.
+/**
+ * The file set of one tsconfig, as tsc would build it. Paths come back absolute with forward
+ * slashes; they are made repo-relative and case-folded here so they compare against git's list.
+ */
 function programFiles(ts, root, configRel) {
   // Forward slashes, because that is the form TypeScript normalises to internally. Handed a
   // backslash path, its config reader asserts on the mismatch the moment it has a diagnostic to
@@ -125,6 +150,14 @@ function programFiles(ts, root, configRel) {
     return { error: `${configRel}: ${ts.flattenDiagnosticMessageText(read.error.messageText, ' ')}` };
   }
   const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, dirname(abs), undefined, abs);
+  // A config tsc would refuse (an `extends` that resolves to nothing, an unknown option) still
+  // comes back with a file list, and for a dropped `extends` that list is the implicit `**/*`.
+  // Counting it would call files covered that tsc never checks. TS18003, "no inputs were found",
+  // is the one diagnostic tolerated: an empty program is still a program.
+  const fatal = (parsed.errors || []).filter((d) => d.code !== 18003);
+  if (fatal.length) {
+    return { error: `${configRel}: ${ts.flattenDiagnosticMessageText(fatal[0].messageText, ' ')}` };
+  }
   const files = new Set();
   const rootFwd = root.replace(/\\/g, '/').replace(/\/$/, '');
   for (const f of parsed.fileNames) {
@@ -137,14 +170,22 @@ function programFiles(ts, root, configRel) {
 
 // --- exemptions --------------------------------------------------------------------------------
 
-// A deliberately SMALL glob: `**` crosses directories, `*` and `?` do not, everything else is
-// literal. It matches the repo-relative forward-slash path, anchored at both ends.
+/**
+ * A deliberately SMALL glob: a double star crosses directories, `*` and `?` do not, everything
+ * else is literal. It matches the repo-relative forward-slash path, anchored at both ends. A
+ * double star followed by a slash keeps a segment boundary after itself and matches zero or more
+ * WHOLE directories: without it an ignore of `generated.ts` under any directory became
+ * `.*generated\.ts` and exempted `notgenerated.ts` as well.
+ */
 function globToRegExp(glob) {
   let re = '';
   for (let i = 0; i < glob.length; i++) {
     const c = glob[i];
     if (c === '*') {
-      if (glob[i + 1] === '*') { re += '.*'; i++; if (glob[i + 1] === '/') i++; }
+      if (glob[i + 1] === '*') {
+        i++;
+        if (glob[i + 1] === '/') { re += '(?:.*/)?'; i++; } else re += '.*';
+      }
       else re += '[^/]*';
     } else if (c === '?') re += '[^/]';
     else re += c.replace(/[.+^${}()|[\]\\]/g, '\\$&');
@@ -362,6 +403,7 @@ function muted(fn) {
 const TSCONFIG_SRC = '{ "compilerOptions": { "strict": true, "noEmit": true, "jsx": "react-jsx" }, "include": ["src"] }\n';
 const SRC_FILE = 'export const one: number = 1;\n';
 
+/** One isolated control per rule, each in a real git repository. Returns the exit code. */
 function selftest() {
   // The fixtures have no node_modules, so the compiler comes from wherever this selftest runs,
   // or from the override. A host with neither cannot judge these controls and says so per line.
@@ -451,6 +493,12 @@ function selftest() {
     ignore: ['supabase/*'],
     expect: 'fail', expectWhy: /supabase\/functions\/hello\/index\.ts <- outside/,
   });
+  cases.push({
+    name: 'a globstar followed by a slash keeps the path boundary',
+    files: { ...base, 'e2e/generated.ts': SRC_FILE, 'e2e/notgenerated.ts': SRC_FILE },
+    ignore: ['**/generated.ts'],
+    expect: 'fail', expectWhy: /e2e\/notgenerated\.ts <- outside/, forbidWhy: /e2e\/generated\.ts/,
+  });
 
   // Rule 2, both twin shapes.
   cases.push({
@@ -498,6 +546,19 @@ function selftest() {
   cases.push({
     name: 'an unreadable tsconfig is UNKNOWN, not clean',
     files: { 'tsconfig.json': '{ this is not json\n', 'src/index.ts': SRC_FILE },
+    expect: 'unknown',
+  });
+  // include names src and src/index.ts exists, so without the diagnostic check this would be clean.
+  cases.push({
+    name: 'a tsconfig whose extends target is missing is UNKNOWN, not clean',
+    files: { 'tsconfig.json': '{ "extends": "./config/missing.json", "include": ["src"] }\n', 'src/index.ts': SRC_FILE },
+    expect: 'unknown',
+  });
+  // A package that resolves as `typescript` and carries none of the compiler API.
+  cases.push({
+    name: 'a typescript package without the compiler API is UNKNOWN, not clean',
+    files: { ...base, 'stub-ts/package.json': '{ "name": "typescript", "version": "0.0.0-stub", "main": "index.js" }\n', 'stub-ts/index.js': 'module.exports = { version: "0.0.0-stub" };\n' },
+    stubCompiler: 'stub-ts',
     expect: 'unknown',
   });
 
@@ -549,7 +610,8 @@ function selftest() {
       // than nothing at all: given nothing, the scan would fall back to the environment override or
       // walk up from the temp directory, and either could find a real compiler and turn UNKNOWN
       // into clean on the one host where that matters least, the developer's own.
-      res = scan(root, { ignore: c.ignore, tsDir: c.noCompiler ? join(root, 'no-typescript-here') : host.from });
+      const tsDir = c.noCompiler ? join(root, 'no-typescript-here') : c.stubCompiler ? join(root, c.stubCompiler) : host.from;
+      res = scan(root, { ignore: c.ignore, tsDir });
     }
     const got = res.unknown ? 'unknown' : (res.ok ? 'clean' : 'fail');
     const whys = (res.findings || []).map((f) => `${f.file} <- ${f.why}`).join(' | ');
@@ -582,6 +644,7 @@ function selftest() {
 
 // --- entry point -------------------------------------------------------------------------------
 
+/** Parses the flags, refuses unknown ones, and dispatches. Returns the exit code. */
 function main(argv, opts = {}) {
   const args = argv.slice(2);
   const ignore = [];
@@ -615,4 +678,6 @@ function main(argv, opts = {}) {
 // No filename guard around this, on purpose: the mutants harness copies this file to
 // `mutant-<n>.mjs` and runs it, and a guard keyed on this file's own name would make every mutant
 // exit without running a single control, which the harness would then score as a crash.
-process.exit(main(process.argv));
+// exitCode rather than exit(): the harness reads this process through a pipe, and exit() can cut
+// off queued stdout before the last control lines reach it.
+process.exitCode = main(process.argv);

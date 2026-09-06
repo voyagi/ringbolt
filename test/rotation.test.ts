@@ -286,8 +286,10 @@ describe("calling back after a snooze", () => {
   });
 });
 
-// Branded the way verifyCall brands a checked API response: a CallSnapshot, then the cast. The
-// tests write the snapshot themselves, so nothing else can put the brand on it.
+/**
+ * Branded the way verifyCall brands a checked API response: a CallSnapshot, then the cast. The
+ * tests write the snapshot themselves, so nothing else can put the brand on it.
+ */
 function snapshotFor(incidentId: string, decision: unknown): VerifiedCall {
   const snapshot: CallSnapshot = {
     id: `call_stub_${incidentId}`,

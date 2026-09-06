@@ -47,9 +47,11 @@ const placer: CallPlacer = {
   },
 };
 
-// The brand on VerifiedCall is what verifyCall adds after checking a real API response. These
-// tests hand the orchestrator a snapshot they wrote themselves, so they put the brand on the same
-// way verifyCall does: a checked CallSnapshot, then the cast.
+/**
+ * The brand on VerifiedCall is what verifyCall adds after checking a real API response. These
+ * tests hand the orchestrator a snapshot they wrote themselves, so they put the brand on the same
+ * way verifyCall does: a checked CallSnapshot, then the cast.
+ */
 function decided(incident: Incident, decision: unknown): VerifiedCall {
   const snapshot: CallSnapshot = {
     id: "call_1",
