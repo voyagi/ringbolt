@@ -63,6 +63,7 @@ function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
 }
 
+/** The repository's top-level directory, so every path the gate compares is relative to one root. */
 function repoRoot(cwd) {
   return git(['rev-parse', '--show-toplevel'], cwd).trim();
 }
@@ -197,6 +198,7 @@ function globToRegExp(glob) {
   return new RegExp(`^${re}$`, 'i');
 }
 
+/** Whether a repo-relative path matches any `--ignore` glob, each already compiled by globToRegExp. */
 function ignoredByFlag(rel, patterns) {
   return patterns.some((re) => re.test(rel));
 }
@@ -391,6 +393,11 @@ function fixture(files, opts = {}) {
   return root;
 }
 
+/**
+ * Runs fn with console.log and console.error silenced, then restores both. The selftest calls the
+ * reporter and the entry point directly, and their output would otherwise interleave with the
+ * control lines the mutants harness parses.
+ */
 function muted(fn) {
   const log = console.log;
   const err = console.error;

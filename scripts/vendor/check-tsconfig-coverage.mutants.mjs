@@ -94,6 +94,11 @@ const MUTATIONS = [
   { name: '--ignore without a glob is refused', expect: '--ignore without a glob is refused', find: "      if (!g || g.startsWith('-')) {", repl: '      if (false) {' },
 ];
 
+/**
+ * The first error line `node --check` prints for a file, or null when it parses. A mutation that
+ * breaks the syntax proves nothing about the rule it targets, so the harness names it instead of
+ * scoring the crash as caught.
+ */
 function parseError(file) {
   try { execFileSync(process.execPath, ['--check', file], { windowsHide: true, stdio: 'pipe' }); return null; }
   catch (e) {
@@ -143,6 +148,7 @@ async function pool(items, limit, fn) {
 // reported sound mutations as escapes on the sibling harness.
 const CONTROL_SEP = '  ::  ';
 const CONTROL_LINE = /^ {2}(ok|FAIL|skip)\s+(.*)$/;
+/** Maps each control name in a selftest run's output to its verdict: ok, FAIL or skip. */
 function controlsIn(out) {
   const map = new Map();
   for (const line of out.split('\n')) {
