@@ -111,12 +111,16 @@ function packageDirOf(entry) {
  * stack where the verdict should be.
  */
 function usable(ts, from) {
-  const missing = [
-    ['readConfigFile', typeof ts?.readConfigFile],
-    ['parseJsonConfigFileContent', typeof ts?.parseJsonConfigFileContent],
-    ['sys.readFile', typeof ts?.sys?.readFile],
-    ['flattenDiagnosticMessageText', typeof ts?.flattenDiagnosticMessageText],
-  ].filter(([, type]) => type !== 'function').map(([name]) => name);
+  const required = {
+    readConfigFile: ts?.readConfigFile,
+    parseJsonConfigFileContent: ts?.parseJsonConfigFileContent,
+    'sys.readFile': ts?.sys?.readFile,
+    flattenDiagnosticMessageText: ts?.flattenDiagnosticMessageText,
+  };
+  const missing = [];
+  for (const [name, fn] of Object.entries(required)) {
+    if (typeof fn !== 'function') missing.push(name);
+  }
   if (missing.length) {
     return { error: `the resolved TypeScript ${ts?.version || '(no version)'} exposes no ${missing.join(', ')}` };
   }
@@ -577,6 +581,7 @@ function selftest() {
   }
 
   const roots = [];
+  /** Builds one control's fixture, runs the scan or report against it, and emits the verdict. */
   function runCase(c) {
     if (c.exitFor) {
       const code = muted(() => report(c.exitFor));

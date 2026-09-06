@@ -312,6 +312,18 @@ async function main() {
   return 0;
 }
 
-// exitCode rather than exit(): under CI capture the report's last lines can still be queued on
-// stdout when main resolves, and exit() would drop them.
-main().then((code) => { process.exitCode = code; }, (e) => { console.error(e && e.stack || e); process.exitCode = 2; });
+/**
+ * exitCode rather than exit(): under CI capture the report's last lines can still be queued on
+ * stdout when main resolves, and exit() would drop them.
+ */
+function finished(code) {
+  process.exitCode = code;
+}
+
+/** A rejection is a harness defect, not a verdict: print it and exit 2, the baseline-not-green code. */
+function crashed(e) {
+  console.error(e && e.stack || e);
+  process.exitCode = 2;
+}
+
+main().then(finished, crashed);
