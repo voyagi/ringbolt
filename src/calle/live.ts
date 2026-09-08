@@ -245,8 +245,19 @@ function toSnapshot(call: Call): CallSnapshot {
     evidence: call.evidence,
     transcript: transcriptOf(call),
     failureCode: call.failureCode ?? attemptFailureCode(call),
+    failureMessage: call.failureMessage ?? attemptFailureMessage(call),
     metadata: call.metadata,
   };
+}
+
+/** The same fallback as the code: the most recent attempt's sentence when the task has none. */
+function attemptFailureMessage(call: Call): string | null {
+  const messages = call.recipients
+    .flatMap((recipient) => recipient.attempts)
+    .map((attempt) => attempt.failureMessage)
+    .filter((message): message is string => message !== null);
+
+  return messages.at(-1) ?? null;
 }
 
 /**

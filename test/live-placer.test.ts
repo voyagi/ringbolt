@@ -339,6 +339,45 @@ describe("what the adapter reads back", () => {
     );
   });
 
+  /**
+   * The sentence beside the code. On 2026-09-08 a task failed before dialling with
+   * `call_not_ready`, which their docs define as something else entirely, and the only thing that
+   * explained it was this field, read by hand through their CLI. It is carried now, with the same
+   * fallback to the last attempt as the code has.
+   */
+  it("carries the sentence CALL-E writes beside the failure code", async () => {
+    const api = calleApiStub();
+    const { placer } = placerWith(api);
+    const placed = await placer.place(anIncidentCall());
+
+    api.settle(placed.id, {
+      status: "failed",
+      failure_code: "call_not_ready",
+      failure_message:
+        "Call task creation was rejected: Calls to the Netherlands in English are not supported for this call setup.",
+    });
+    expect((await placer.get(placed.id)).failureMessage).toBe(
+      "Call task creation was rejected: Calls to the Netherlands in English are not supported for this call setup.",
+    );
+
+    api.settle(placed.id, {
+      status: "failed",
+      failure_code: null,
+      failure_message: null,
+      recipients: [
+        aRecipient([
+          anAttempt({
+            failure_code: "no_answer",
+            failure_message: "Nobody picked up.",
+          }),
+        ]),
+      ],
+    });
+    expect((await placer.get(placed.id)).failureMessage).toBe(
+      "Nobody picked up.",
+    );
+  });
+
   it("produces a terminal snapshot the verification step accepts", async () => {
     const api = calleApiStub();
     const { placer } = placerWith(api);

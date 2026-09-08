@@ -39,6 +39,19 @@ import {
 } from "./rotation.js";
 
 /**
+ * What the timeline says when a call is over: CALL-E's summary when there is one, otherwise the
+ * sentence they wrote beside the failure code, which is what explains a call that never connected.
+ * On 2026-09-08 a task failed before dialling and the record read "The call ended." while the
+ * sentence that explained it, a region their planner had stopped serving, sat unread in the API
+ * response. A person reading the incident should not need the API to learn why nobody was called.
+ */
+function endedMessage(snapshot: CallSnapshot): string {
+  if (snapshot.summary !== null) return snapshot.summary;
+  const reason = snapshot.failureMessage?.trim() ?? "";
+  return reason === "" ? "The call ended." : `The call ended: ${reason}`;
+}
+
+/**
  * Runs a read-then-write section with no other message about the same incident interleaving.
  *
  * The incident lifecycle reads a row, decides on it, and writes it back, and every one of those
@@ -189,17 +202,13 @@ export class Orchestrator {
       redactedAt: null,
     });
 
-    await this.record(
-      incident.id,
-      "call.ended",
-      snapshot.summary ?? "The call ended.",
-      {
-        status: snapshot.status,
-        confidence: snapshot.confidenceScore,
-        transcriptTurns: snapshot.transcript.length,
-        failureCode: snapshot.failureCode,
-      },
-    );
+    await this.record(incident.id, "call.ended", endedMessage(snapshot), {
+      status: snapshot.status,
+      confidence: snapshot.confidenceScore,
+      transcriptTurns: snapshot.transcript.length,
+      failureCode: snapshot.failureCode,
+      failureMessage: snapshot.failureMessage ?? null,
+    });
 
     const policy = await this.policyFor(incident.service);
     const authorization = authorize({
