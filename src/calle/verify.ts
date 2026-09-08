@@ -38,6 +38,7 @@ const callSnapshotShape = z.object({
   ),
   metadata: z.record(z.string(), z.unknown()),
   failureCode: z.string().nullable(),
+  failureMessage: z.string().nullable().optional(),
 });
 
 export async function verifyCall(

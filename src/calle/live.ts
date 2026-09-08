@@ -234,6 +234,7 @@ export class LiveCallPlacer implements CallPlacer {
 }
 
 function toSnapshot(call: Call): CallSnapshot {
+  const failure = failureOf(call);
   return {
     id: call.id,
     status: call.status,
@@ -244,7 +245,8 @@ function toSnapshot(call: Call): CallSnapshot {
     summary: call.summary,
     evidence: call.evidence,
     transcript: transcriptOf(call),
-    failureCode: call.failureCode ?? attemptFailureCode(call),
+    failureCode: failure.code,
+    failureMessage: failure.message,
     metadata: call.metadata,
   };
 }
@@ -271,12 +273,24 @@ function transcriptOf(call: Call): TranscriptTurn[] {
  * A task-level failure code is set only when the whole task failed, while the reason one telephone
  * did not answer sits on the attempt. Phase 3 decides who to try next from this field, so the most
  * recent attempt's reason is carried up rather than reported as no reason at all.
+ *
+ * The code and the sentence beside it come from ONE source: the task, or the last attempt that
+ * carries a code. Read separately, a busy attempt with a sentence followed by a no-answer attempt
+ * without one would record the second code beside the first sentence, and the timeline would
+ * explain the wrong failure.
  */
-function attemptFailureCode(call: Call): string | null {
-  const codes = call.recipients
+function failureOf(call: Call): {
+  code: string | null;
+  message: string | null;
+} {
+  if (call.failureCode !== null) {
+    return { code: call.failureCode, message: call.failureMessage };
+  }
+  const last = call.recipients
     .flatMap((recipient) => recipient.attempts)
-    .map((attempt) => attempt.failureCode)
-    .filter((code): code is string => code !== null);
-
-  return codes.at(-1) ?? null;
+    .filter((attempt) => attempt.failureCode !== null)
+    .at(-1);
+  return last === undefined
+    ? { code: null, message: null }
+    : { code: last.failureCode, message: last.failureMessage };
 }

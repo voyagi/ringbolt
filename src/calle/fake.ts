@@ -201,6 +201,7 @@ export class FakeCallPlacer implements CallPlacer {
       transcript: [],
       metadata: input.metadata,
       failureCode: null,
+      failureMessage: null,
     };
     await this.options.store.put(input.idempotencyKey, queued);
 
@@ -229,6 +230,7 @@ export class FakeCallPlacer implements CallPlacer {
       id,
       metadata: input.metadata,
       failureCode: null as string | null,
+      failureMessage: null as string | null,
       evidence: [] as string[],
       transcript: [] as CallSnapshot["transcript"],
     };
@@ -259,6 +261,8 @@ export class FakeCallPlacer implements CallPlacer {
           structuredResult: null,
           summary: "Nobody picked up.",
           failureCode: "no_answer",
+          failureMessage:
+            "The recipient did not answer before the attempt timed out.",
         };
       case "hangs_up":
         return {

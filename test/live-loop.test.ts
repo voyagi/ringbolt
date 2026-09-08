@@ -177,6 +177,87 @@ describe("the loop running on the CALL-E adapter", () => {
   });
 
   /**
+   * The shape of 2026-09-08: CALL-E accepted the task and nineteen seconds later marked it failed
+   * without dialling, because their planner had stopped serving the region. The code was
+   * `call_not_ready`, which their docs define as "not yet terminal", and the sentence that actually
+   * explained it was in the response the whole time. The incident's own record has to carry that
+   * sentence, or the next person reads "The call ended." and goes looking in the API.
+   */
+  it("records the sentence CALL-E wrote when a task fails before dialling", async () => {
+    const api = calleApiStub();
+    const orchestrator = liveOrchestrator(api);
+
+    const opened = await orchestrator.open(alert);
+    if (opened.kind !== "created") throw new Error("the incident was not made");
+    const callId = opened.incident.callId;
+    if (callId === null) throw new Error("no call was recorded");
+
+    api.settle(callId, {
+      status: "failed",
+      failure_code: "call_not_ready",
+      failure_message:
+        "Call task creation was rejected: Calls to the Netherlands in English are not supported for this call setup.",
+      recipients: [{ ...aRecipient([]), status: "pending" }],
+    });
+
+    await orchestrator.onCallTerminal(
+      await verifyCall(livePlacer(api), callId),
+    );
+
+    const repo = new Repo(env.DB);
+    const ended = (await repo.listEvents(opened.incident.id)).find(
+      (event) => event.kind === "call.ended",
+    );
+    expect(ended?.message).toBe(
+      "The call ended: Call task creation was rejected: Calls to the Netherlands in English are not supported for this call setup.",
+    );
+    expect(ended?.data).toMatchObject({
+      failureCode: "call_not_ready",
+      failureMessage:
+        "Call task creation was rejected: Calls to the Netherlands in English are not supported for this call setup.",
+    });
+    expect((await repo.getIncident(opened.incident.id))?.outcome).toBe(
+      "escalation_exhausted",
+    );
+  });
+
+  /**
+   * A summary is prose from the provider and its type allows an empty string, so "there is a
+   * summary" cannot be decided by a null check alone. A blank one used to win over the failure
+   * sentence and put an empty line on the timeline, which reads as a call that ended for no
+   * stated reason while the reason sat in the same response.
+   */
+  it("prefers the failure sentence over a summary that is blank", async () => {
+    const api = calleApiStub();
+    const orchestrator = liveOrchestrator(api);
+
+    const opened = await orchestrator.open(alert);
+    if (opened.kind !== "created") throw new Error("the incident was not made");
+    const callId = opened.incident.callId;
+    if (callId === null) throw new Error("no call was recorded");
+
+    api.settle(callId, {
+      status: "failed",
+      summary: "   ",
+      failure_code: "call_not_ready",
+      failure_message: "Calls to this region are not supported.",
+      recipients: [{ ...aRecipient([]), status: "pending" }],
+    });
+
+    await orchestrator.onCallTerminal(
+      await verifyCall(livePlacer(api), callId),
+    );
+
+    const repo = new Repo(env.DB);
+    const ended = (await repo.listEvents(opened.incident.id)).find(
+      (event) => event.kind === "call.ended",
+    );
+    expect(ended?.message).toBe(
+      "The call ended: Calls to this region are not supported.",
+    );
+  });
+
+  /**
    * CALL-E validates the task before it will create one, and it rejected the first real attempt
    * with "who should the bot say is calling in the opening sentence?". The instruction said to say
    * who was calling without ever saying who that was. Nothing was dialled and nothing was spent,

@@ -126,3 +126,30 @@ call has yet been placed with the locale and region set. The 23 silent calls wer
 the open-ended shape is not recorded here, and it does not bear on the question, since they
 connected and were transcribed. The live test stands as written, and its next attempt is the first
 one that can answer it.
+
+## 2026-09-08, second attempt: accepted, then refused for the region
+
+With the contract fixed, the same test was run again the same evening. CALL-E accepted the create
+(`call_3Iea9VhkLFrtbAb9088nQw`, 15:30:24Z) and nineteen seconds later marked the task failed with
+the code `call_not_ready` and this sentence, read back through their CLI:
+
+> Call task creation was rejected: Calls to the Netherlands in English are not supported for this
+> call setup. Which supported region/language combination should be used instead if you want to
+> continue?
+
+The recipient stayed `pending` with no attempts, so nothing was dialled and no telephone rang. Their
+published region table lists the Netherlands, `+31`, English, in the "International" tier, which
+their note describes as "primarily intended for testing". Two other reports on their tracker from
+the same weekend say the same of Spain and of Indonesia, both also "International" (call-e-integrations
+issues 116 and 118), each for a combination the table lists. The refusal is on their side, and it
+has been reported to them with the call id.
+
+What this does to the question above: it cannot be answered from a Dutch number until CALL-E dials
+the Netherlands again. It also reframes the 23 silent calls. They were placed with neither a region
+nor a language, and a planner that now refuses this combination outright may then have been placing
+them with a setup it did not support. That is consistent with one-way audio. It is still not proof.
+
+What changed in the code: a call's record now carries the sentence CALL-E writes beside its failure
+code, so the next refusal explains itself on the incident page. This one read "The call ended."
+while the sentence above sat unread in the API response, and it took a read by hand to learn why
+nobody was called.

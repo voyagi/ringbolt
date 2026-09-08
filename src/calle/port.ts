@@ -41,6 +41,14 @@ export type CallSnapshot = {
   transcript: TranscriptTurn[];
   metadata: JsonObject;
   failureCode: string | null;
+  /**
+   * The sentence CALL-E writes beside the code, when it writes one. On 2026-09-08 a task failed
+   * before dialling with the code `call_not_ready`, and the sentence that explained it ("Calls to
+   * the Netherlands in English are not supported for this call setup") sat unread in the API
+   * response while the record said "The call ended." Optional so that a snapshot built by a test
+   * or an older store still reads; the two placers always fill it in.
+   */
+  failureMessage?: string | null;
 };
 
 /**

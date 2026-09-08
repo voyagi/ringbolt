@@ -6,7 +6,7 @@ Nothing is estimated, and a number nobody can reproduce is not in this file.
 
 ## The suite
 
-`npm test` runs 451 tests across 31 files inside a real Workers isolate against a real D1, in about
+`npm test` runs 455 tests across 31 files inside a real Workers isolate against a real D1, in about
 21 seconds. Nothing in it can reach a telephone or spend a cent: `vitest.config.ts` pins the mode
 to the local stand-in, the API key to a string that cannot authenticate, the number to an
 unassigned country code, the spending cap to nothing, and the only host a runbook action may call
