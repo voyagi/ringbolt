@@ -378,6 +378,37 @@ describe("what the adapter reads back", () => {
     );
   });
 
+  /**
+   * The code and the sentence come from one attempt. Read separately, a busy attempt with a
+   * sentence followed by a no-answer attempt without one would put the second code beside the
+   * first sentence, and the timeline would explain the wrong failure.
+   */
+  it("keeps the sentence tied to the attempt the code came from", async () => {
+    const api = calleApiStub();
+    const { placer } = placerWith(api);
+    const placed = await placer.place(anIncidentCall());
+
+    api.settle(placed.id, {
+      status: "failed",
+      failure_code: null,
+      failure_message: null,
+      recipients: [
+        aRecipient([
+          anAttempt({
+            id: "att_1",
+            failure_code: "busy",
+            failure_message: "The line was busy.",
+          }),
+          anAttempt({ id: "att_2", failure_code: "no_answer" }),
+        ]),
+      ],
+    });
+
+    const read = await placer.get(placed.id);
+    expect(read.failureCode).toBe("no_answer");
+    expect(read.failureMessage).toBeNull();
+  });
+
   it("produces a terminal snapshot the verification step accepts", async () => {
     const api = calleApiStub();
     const { placer } = placerWith(api);
