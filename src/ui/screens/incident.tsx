@@ -151,6 +151,9 @@ function Call({
   total: number;
 }): ReactNode {
   const grant = grantingTurn(call.transcript, spokenPhrase(run));
+  // A blank summary is not a summary: rendering one would leave an empty styled line under the
+  // transcript. Same reading as the timeline's, which treats blank prose from the provider as absent.
+  const summary = call.summary?.trim() ?? "";
   return (
     <section className="card">
       <h2>
@@ -163,7 +166,7 @@ function Call({
       <TalkTrack transcript={call.transcript} grant={grant} />
       <Transcript call={call} grant={grant} />
       {run !== undefined && <Docket run={run} confidence={call.confidence} />}
-      {call.summary !== null && <p className="heard">{call.summary}</p>}
+      {summary !== "" && <p className="heard">{summary}</p>}
     </section>
   );
 }

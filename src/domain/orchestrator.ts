@@ -44,9 +44,14 @@ import {
  * On 2026-09-08 a task failed before dialling and the record read "The call ended." while the
  * sentence that explained it, a region their planner had stopped serving, sat unread in the API
  * response. A person reading the incident should not need the API to learn why nobody was called.
+ *
+ * A summary that is present but blank counts as no summary. The field is prose from the provider
+ * and its type allows an empty string, so a null check alone would put an empty line on the
+ * timeline while the sentence that explained the failure sat unread beside it.
  */
 function endedMessage(snapshot: CallSnapshot): string {
-  if (snapshot.summary !== null) return snapshot.summary;
+  const summary = snapshot.summary?.trim() ?? "";
+  if (summary !== "") return summary;
   const reason = snapshot.failureMessage?.trim() ?? "";
   return reason === "" ? "The call ended." : `The call ended: ${reason}`;
 }
