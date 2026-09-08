@@ -11,7 +11,8 @@
     "src/domain/incident.ts",
     "src/domain/view.ts",
     "src/domain/brief.ts",
-    "src/actions/parameters.ts"
+    "src/actions/parameters.ts",
+    "src/calle/schema.ts"
   ],
   "incremental": true,
   "concurrency": 4,

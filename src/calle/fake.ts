@@ -5,6 +5,7 @@ import type {
   Scheduler,
   TranscriptTurn,
 } from "./port.js";
+import { SchemaNotSupportedError, resultSchemaProblem } from "./schema.js";
 
 /**
  * The outcomes the stand-in can rehearse. Named here rather than only in the union below because
@@ -175,6 +176,14 @@ export class FakeCallPlacer implements CallPlacer {
   }
 
   async place(input: PlaceCallInput): Promise<CallSnapshot> {
+    // The real API refuses a schema its extraction cannot take before any call task exists, so the
+    // stand-in refuses the same schemas at the same point. The suite runs the real decision contract
+    // through this placer, and a stand-in that took what CALL-E refuses passed a contract the
+    // telephone then failed, which is how the 2026-09-08 refusal got past every test there was.
+    const schemaProblem = resultSchemaProblem(input.resultSchema);
+    if (schemaProblem !== null)
+      throw new SchemaNotSupportedError(schemaProblem);
+
     const existing = await this.options.store.findByIdempotencyKey(
       input.idempotencyKey,
     );

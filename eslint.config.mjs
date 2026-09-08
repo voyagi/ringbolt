@@ -27,6 +27,10 @@ export default [
       'verify-ship.mjs',
       // Emitted by `wrangler types` on every config change, and not committed.
       'worker-configuration.d.ts',
+      // Where `wrangler dev` writes its bundle while it runs. Not committed, and not this product's
+      // code: with a dev server up, linting it reported 75 complexity errors from the SDK and the
+      // runtime shims, and the gate failed on the one machine where somebody was actually working.
+      '.wrangler/**',
       // Needs the fault-lane dependencies, installed in the attack pass.
       'test/fault/**',
     ],

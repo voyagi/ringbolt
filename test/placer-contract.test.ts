@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { D1FakeCallStore, FakeCallPlacer } from "../src/calle/fake.js";
 import { LiveCallPlacer } from "../src/calle/live.js";
 import type { CallPlacer, PlaceCallInput } from "../src/calle/port.js";
+import { SchemaNotSupportedError } from "../src/calle/schema.js";
 import { verifyCall } from "../src/calle/verify.js";
 import { calleApiStub } from "./support/calle-api.js";
 
@@ -91,6 +92,31 @@ describe.each(implementations)("$name", ({ build }) => {
     const second = await placer.place(callFor("inc_other:attempt-1"));
 
     expect(second.id).not.toBe(first.id);
+  });
+
+  /**
+   * CALL-E refuses a result schema that uses a feature its extraction does not take, before any
+   * call task exists. Both telephones have to refuse the same schema at the same point, or the
+   * suite passes a contract the real one then fails, which is exactly how the 2026-09-08 refusal
+   * got past it. Nothing is made under the key, so the same key with a schema they take still
+   * places a fresh call.
+   */
+  it("refuses a result schema CALL-E would refuse, and makes nothing under the key", async () => {
+    const placer = build();
+    const refused = {
+      ...callFor("inc_contract:attempt-1"),
+      resultSchema: {
+        type: "object",
+        additionalProperties: { type: "string" },
+      },
+    };
+
+    await expect(placer.place(refused)).rejects.toThrow(
+      SchemaNotSupportedError,
+    );
+    await expect(
+      placer.place(callFor("inc_contract:attempt-1")),
+    ).resolves.toMatchObject({ status: "queued" });
   });
 
   it("carries the metadata that names the incident", async () => {

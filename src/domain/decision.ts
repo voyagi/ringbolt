@@ -4,47 +4,111 @@ import { readParameters } from "../actions/parameters.js";
 import { phrasesMatch, turnGranting } from "./view.js";
 
 /**
- * The shape Ringbolt asks CALL-E to extract from the conversation. It is sent as the call's
- * `resultSchema` so the spoken answer comes back validated rather than as prose we have to guess at.
+ * An action as the decision contract needs it: which action, and which values it asks the responder
+ * for. The orchestrator's runbook actions satisfy this as they are.
  */
-export const decisionResultSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["decision"],
-  properties: {
-    decision: {
-      type: "string",
-      enum: ["run_action", "hold", "escalate", "snooze"],
-      description:
-        "What the responder decided. run_action means carry out one of the offered actions. hold means change nothing. escalate means hand this to someone else. snooze means leave it and call back later.",
-    },
-    action_id: {
-      type: "string",
-      description:
-        "The id of the action to run. Required when decision is run_action. Must be one of the action ids read out on the call.",
-    },
-    confirmation_phrase: {
-      type: "string",
-      description:
-        "The exact confirmation phrase the responder said out loud. Required for any action marked as needing confirmation.",
-    },
-    action_parameters: {
-      type: "object",
-      additionalProperties: { type: "string" },
-      description:
-        "Any values the chosen action asked for, keyed by the parameter name that was read out. Leave a value out rather than guessing at it.",
-    },
-    snooze_minutes: {
-      type: "number",
-      description:
-        "How long to wait before calling back. Only when decision is snooze.",
-    },
-    reason: {
-      type: "string",
-      description: "The responder's own words for why they decided this.",
-    },
+export type SchemaAction = {
+  id: string;
+  parameters?: readonly ActionParameter[];
+};
+
+const decisionProperties = {
+  decision: {
+    type: "string",
+    enum: ["run_action", "hold", "escalate", "snooze"],
+    description:
+      "What the responder decided. run_action means carry out one of the offered actions. hold means change nothing. escalate means hand this to someone else. snooze means leave it and call back later.",
+  },
+  action_id: {
+    type: "string",
+    description:
+      "The id of the action to run. Required when decision is run_action. Must be one of the action ids read out on the call.",
+  },
+  confirmation_phrase: {
+    type: "string",
+    description:
+      "The exact confirmation phrase the responder said out loud. Required for any action marked as needing confirmation.",
+  },
+  snooze_minutes: {
+    type: "number",
+    description:
+      "How long to wait before calling back. Only when decision is snooze.",
+  },
+  reason: {
+    type: "string",
+    description: "The responder's own words for why they decided this.",
   },
 } as const;
+
+/**
+ * The shape Ringbolt asks CALL-E to extract from the conversation. It is sent as the call's
+ * `resultSchema` so the spoken answer comes back validated rather than as prose we have to guess at.
+ *
+ * It is built for each call rather than declared once, because of `action_parameters`. From
+ * 2026-08-22 that field was an object with any string keys, which is not a shape CALL-E's
+ * extraction takes (`src/calle/schema.ts` says what it does take), and on 2026-09-08 the first
+ * call after the top-up was refused on it before it dialled. The values an action can ask for are
+ * known when the call is placed, so the field now names each one, and is left out when nothing on
+ * the call asks for a value: a field the responder cannot be asked to fill is one the extraction
+ * can only guess at.
+ *
+ * Every value is asked for as text, whatever type the action declared. The responder answers in
+ * words, and `readParameters` is what decides whether "four hundred" fits a number. An extraction
+ * told to return a number returns nothing at all when it cannot, and that loses the whole decision
+ * over one value.
+ */
+export function decisionResultSchemaFor(
+  offered: readonly SchemaAction[],
+): Record<string, unknown> {
+  const values = valuesAskedFor(offered);
+  const properties =
+    values === null
+      ? decisionProperties
+      : {
+          ...decisionProperties,
+          action_parameters: {
+            type: "object",
+            additionalProperties: false,
+            properties: values,
+            description:
+              "The values the chosen action asked for, keyed by the parameter name that was read out. Leave a value out rather than guessing at it.",
+          },
+        };
+
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["decision"],
+    properties,
+  };
+}
+
+/** One text field per parameter name any offered action asks for, or null when none does. */
+function valuesAskedFor(
+  offered: readonly SchemaAction[],
+): Record<string, { type: "string"; description: string }> | null {
+  const asks = new Map<string, string[]>();
+  for (const action of offered) {
+    for (const parameter of action.parameters ?? []) {
+      const lines = asks.get(parameter.name) ?? [];
+      lines.push(
+        `For ${action.id}: ${parameter.description.replace(/\.$/, "")}.`,
+      );
+      asks.set(parameter.name, lines);
+    }
+  }
+  if (asks.size === 0) return null;
+
+  return Object.fromEntries(
+    [...asks].map(([name, lines]) => [
+      name,
+      {
+        type: "string",
+        description: `${lines.join(" ")} Exactly what the responder said, as words.`,
+      },
+    ]),
+  );
+}
 
 export const decisionKinds = [
   "run_action",

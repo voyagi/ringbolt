@@ -57,6 +57,15 @@ describe("the test environment itself", () => {
   });
 
   /**
+   * The cap is money, and it lives in `.dev.vars` beside the key when an operator is about to place
+   * a real call. On 2026-09-08 the suite read that cap and a test that expects a fresh build to
+   * have nothing to spend failed on it. Whatever the machine says, this suite has nothing to spend.
+   */
+  it("has nothing to spend, whatever the machine's own cap says", () => {
+    expect(readConfig(env).CALLE_CREDIT_USD).toBe(0);
+  });
+
+  /**
    * The same idea one layer out. A runbook action can reach any host somebody stores in a table,
    * and a test can store one, so the suite pins the only name any action it defines may call. That
    * name does not resolve, so the worst a stored action can do here is fail to connect.

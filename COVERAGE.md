@@ -1,14 +1,16 @@
 # What the tests actually cover
 
-Measured 2026-08-28 on `main`. Every number here is the output of the command beside it, run on
-the day given. Nothing is estimated, and a number nobody can reproduce is not in this file.
+Line coverage measured 2026-08-28 on `main`; the suite and the mutation score re-measured
+2026-09-08. Every number here is the output of the command beside it, run on the day given.
+Nothing is estimated, and a number nobody can reproduce is not in this file.
 
 ## The suite
 
-`npm test` runs 412 tests across 30 files inside a real Workers isolate against a real D1, in about
-19 seconds. Nothing in it can reach a telephone: `vitest.config.ts` pins the mode to the local
-stand-in, the API key to a string that cannot authenticate, the number to an unassigned country
-code, and the only host a runbook action may call to a name that does not resolve.
+`npm test` runs 451 tests across 31 files inside a real Workers isolate against a real D1, in about
+21 seconds. Nothing in it can reach a telephone or spend a cent: `vitest.config.ts` pins the mode
+to the local stand-in, the API key to a string that cannot authenticate, the number to an
+unassigned country code, the spending cap to nothing, and the only host a runbook action may call
+to a name that does not resolve.
 
 ## Line coverage
 
@@ -56,25 +58,28 @@ Where the server gaps are, and why they are where they are:
 suite would have noticed if the line were wrong, which is the question worth asking of an
 authorization gate.
 
-Measured 2026-08-28: **76.10%** overall, 640 of 841 mutants detected (639 killed, one timeout).
-The previous figure was 75.62% on 2026-08-24, before the hardening work grew `decision.ts` and
-`view.ts` with the rule that a confirmation nobody is recorded saying is refused. Re-measuring
-after that change surfaced three undetected mutants in the new transcript search, all three at its
-boundaries: a phrase carried by the very first turn, and a required phrase that normalises to no
-words at all. The search now has direct tests for those boundaries and the mutants are killed. The
-two mutants still alive in it are equivalent, not gaps: an out-of-bounds loop start that the
+Measured 2026-09-08: **78.63%** overall, 747 of 950 mutants detected (746 killed, one timeout).
+The previous figure was 76.10% on 2026-08-28. Two things moved it: `src/calle/schema.ts` joined
+the measured list, the check both placers run on the contract sent to CALL-E after a call was
+refused on that contract before it dialled, and it scores 100% on 74 mutants because its first
+run left three alive and each got the test it was missing (a field with no type at all, the
+properties check after a clean `items`, and the error's name). And `decision.ts` rose from 80.90%
+to 83.10% with the contract builder that replaced the constant. The 2026-08-28 remeasure had
+surfaced three undetected mutants at the boundaries of the transcript search, all killed since;
+the two still alive there are equivalent, not gaps: an out-of-bounds loop start that the
 undefined guard absorbs without changing any answer, and that guard itself, which exists to absorb
 exactly that.
 
-| Module                      | Score  | What it decides                                    |
-| --------------------------- | ------ | -------------------------------------------------- |
-| `src/domain/policy.ts`      | 84.78% | Whether a telephone rings at all, and when         |
-| `src/domain/decision.ts`    | 80.90% | Whether a spoken decision may change production    |
-| `src/actions/parameters.ts` | 79.43% | What values reach the system being changed         |
-| `src/domain/view.ts`        | 79.33% | What every screen says about a state               |
-| `src/domain/incident.ts`    | 70.49% | The state machine and how an incident is described |
-| `src/domain/rotation.ts`    | 32.14% | Who is called next                                 |
-| `src/domain/brief.ts`       | 14.29% | What the caller says                               |
+| Module                      | Score   | What it decides                                    |
+| --------------------------- | ------- | -------------------------------------------------- |
+| `src/calle/schema.ts`       | 100.00% | Whether a contract can be sent to CALL-E at all    |
+| `src/domain/policy.ts`      | 84.78%  | Whether a telephone rings at all, and when         |
+| `src/domain/decision.ts`    | 83.10%  | Whether a spoken decision may change production    |
+| `src/actions/parameters.ts` | 79.43%  | What values reach the system being changed         |
+| `src/domain/view.ts`        | 79.33%  | What every screen says about a state               |
+| `src/domain/incident.ts`    | 70.49%  | The state machine and how an incident is described |
+| `src/domain/rotation.ts`    | 32.14%  | Who is called next                                 |
+| `src/domain/brief.ts`       | 14.29%  | What the caller says                               |
 
 Two of those low numbers are honest rather than alarming, and one of them is a real gap:
 
@@ -94,8 +99,9 @@ their modules in `src/`, in a plain Node process. It does not run anything in `t
 those need a Workers isolate and a D1 database and would take hours per mutant.
 
 So the score covers the decisions and excludes the plumbing. Not measured by it: the Durable
-Object, the D1 access layer, the HTTP routes, the runbook execution engine, the CALL-E adapter, the
-reconciliation sweep, the rate limiter, the retention sweep and every screen. Those are covered by
+Object, the D1 access layer, the HTTP routes, the runbook execution engine, the CALL-E adapter
+(its schema check excepted), the reconciliation sweep, the rate limiter, the retention sweep and
+every screen. Those are covered by
 the suite and by the accessibility gate, and the last two are the hardening additions
 (`src/worker/limits.ts`, `src/worker/retention.ts`): thin orchestration over the database layer,
 whose decisions live in SQL and are held by planted-fault tests in `test/`, so putting them on the

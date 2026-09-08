@@ -25,6 +25,11 @@ export default defineConfig({
           // Third layer. Country code 999 is unassigned, so this is a well-formed number that no
           // telephone network can route. A live placer reaching dial would ring nothing.
           DEMO_PHONE: "+99900000000",
+          // Fourth layer, and the one that was missing on 2026-09-08: the suite read the spending
+          // cap an operator had just written into `.dev.vars` for a real call, and a test that
+          // expects a fresh build to have nothing to spend failed on their money. A test that needs
+          // credit says so in its own configuration.
+          CALLE_CREDIT_USD: "0",
           // The stand-in's think time only exists so a demo looks like a real call.
           CALLE_FAKE_DELAY_MS: "20",
           INTAKE_TOKEN: "test-dummy-intake-token-0123456789",
