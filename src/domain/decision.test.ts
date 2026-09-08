@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ActionParameter } from "../actions/definition.js";
+import { resultSchemaProblem } from "../calle/schema.js";
 import {
   CONFIDENCE_FLOOR,
   type AuthorizationInput,
   authorize,
+  decisionResultSchemaFor,
 } from "./decision.js";
 
 const offered = [
@@ -492,5 +494,107 @@ describe("authorizing the values an action was given", () => {
         },
       }),
     ).toMatchObject({ authorized: true });
+  });
+});
+
+/**
+ * The contract sent to CALL-E is built per call, and the one thing that varies is which values the
+ * offered actions ask for. Everything else about it is pinned by the adapter tests, which check what
+ * actually goes on the wire.
+ */
+describe("decisionResultSchemaFor", () => {
+  const instances: ActionParameter = {
+    name: "instances",
+    description: "how many instances to run",
+    required: true,
+    type: "number",
+  };
+  const release: ActionParameter = {
+    name: "release",
+    description: "the release to roll back to.",
+    required: true,
+    type: "string",
+    maxLength: 80,
+  };
+
+  function properties(schema: Record<string, unknown>) {
+    return schema["properties"] as Record<string, Record<string, unknown>>;
+  }
+
+  it("leaves action_parameters out when nothing on the call asks for a value", () => {
+    const schema = decisionResultSchemaFor([
+      { id: "kill_switch" },
+      { id: "rollback", parameters: [] },
+    ]);
+
+    expect(schema["required"]).toEqual(["decision"]);
+    expect(Object.keys(properties(schema))).toEqual([
+      "decision",
+      "action_id",
+      "confirmation_phrase",
+      "snooze_minutes",
+      "reason",
+    ]);
+  });
+
+  it("names every value an offered action asks for, as words, and nothing else", () => {
+    const schema = decisionResultSchemaFor([
+      { id: "scale_out", parameters: [instances] },
+      { id: "rollback", parameters: [release] },
+    ]);
+
+    const values = properties(schema)["action_parameters"];
+    expect(values).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+    });
+    const named = values?.["properties"] as Record<
+      string,
+      { type: string; description: string }
+    >;
+    expect(Object.keys(named)).toEqual(["instances", "release"]);
+    expect(named["instances"]).toEqual({
+      type: "string",
+      description:
+        "For scale_out: how many instances to run. Exactly what the responder said, as words.",
+    });
+    expect(named["release"]?.description).toBe(
+      "For rollback: the release to roll back to. Exactly what the responder said, as words.",
+    );
+  });
+
+  it("merges a value two actions both ask for into one field that names both", () => {
+    const schema = decisionResultSchemaFor([
+      { id: "scale_out", parameters: [instances] },
+      {
+        id: "scale_in",
+        parameters: [{ ...instances, description: "how many to keep" }],
+      },
+    ]);
+
+    const named = properties(schema)["action_parameters"]?.[
+      "properties"
+    ] as Record<string, { description: string }>;
+    expect(Object.keys(named)).toEqual(["instances"]);
+    expect(named["instances"]?.description).toBe(
+      "For scale_out: how many instances to run. For scale_in: how many to keep. Exactly what the responder said, as words.",
+    );
+  });
+
+  /**
+   * The check both placers run before a call, applied to the two shapes this builder can produce.
+   * The shape it replaced fails this check (`src/calle/schema.test.ts` holds that control), which
+   * is the whole reason the builder exists.
+   */
+  it("builds a contract CALL-E accepts, with and without values to ask for", () => {
+    expect(resultSchemaProblem(decisionResultSchemaFor([]))).toBeNull();
+    expect(
+      resultSchemaProblem(
+        decisionResultSchemaFor([
+          { id: "scale_out", parameters: [instances] },
+          { id: "rollback", parameters: [release] },
+        ]),
+      ),
+    ).toBeNull();
   });
 });

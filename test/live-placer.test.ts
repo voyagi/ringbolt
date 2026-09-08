@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CallBudgetExhaustedError,
   CallBurstError,
+  CallRejectedError,
   LiveCallPlacer,
   NumberNotAllowedError,
 } from "../src/calle/live.js";
@@ -9,8 +10,12 @@ import {
   CALL_PRICE_USD,
   MAX_CALLS_PER_BURST_WINDOW,
 } from "../src/calle/port.js";
+import {
+  SchemaNotSupportedError,
+  resultSchemaProblem,
+} from "../src/calle/schema.js";
 import { verifyCall } from "../src/calle/verify.js";
-import { decisionResultSchema } from "../src/domain/decision.js";
+import { decisionResultSchemaFor } from "../src/domain/decision.js";
 import {
   type CalleApiStub,
   aRecipient,
@@ -50,11 +55,27 @@ function placerWith(
   };
 }
 
+/** Two actions the policy allows on this call, one of which asks the responder for a value. */
+const offeredOnTheCall = [
+  { id: "kill_switch" },
+  {
+    id: "scale_out",
+    parameters: [
+      {
+        name: "instances",
+        description: "how many instances to run",
+        required: true,
+        type: "number" as const,
+      },
+    ],
+  },
+];
+
 function anIncidentCall() {
   return {
     phone: OWNED_NUMBER,
     task: "Checkout is returning errors. Ask what to do.",
-    resultSchema: decisionResultSchema as unknown as Record<string, unknown>,
+    resultSchema: decisionResultSchemaFor(offeredOnTheCall),
     metadata: { incident_id: "inc_live_1", service: "checkout" },
     webhookUrl: "https://ringbolt.example.com/webhooks/calle",
     idempotencyKey: "inc_live_1:attempt-1",
@@ -112,6 +133,94 @@ describe("what the adapter puts on the wire", () => {
       (schema?.["properties"] as { decision?: { enum?: string[] } } | undefined)
         ?.decision?.enum,
     ).toEqual(["run_action", "hold", "escalate", "snooze"]);
+  });
+
+  /**
+   * Sent under the right key is not the same as sent in a shape they take, which is the gap the
+   * 2026-09-08 refusal went through. What goes on the wire is held to their contract here, with the
+   * value an action asks for named in it rather than left as an object with any keys.
+   */
+  it("sends a decision contract CALL-E accepts, naming the value the call asks for", async () => {
+    const { placer, api } = placerWith(calleApiStub());
+    await placer.place(anIncidentCall());
+
+    const schema = api.creates[0]?.body["result_schema"];
+    expect(resultSchemaProblem(schema)).toBeNull();
+    expect(schema).toMatchObject({
+      properties: {
+        action_parameters: {
+          additionalProperties: false,
+          properties: { instances: { type: "string" } },
+        },
+      },
+    });
+  });
+});
+
+describe("what the adapter refuses before the wire, and how it reports theirs", () => {
+  /**
+   * The shape refused on 2026-09-08 must never reach CALL-E again: not because the refusal costs
+   * money (it does not, no task is made), but because "result_schema is not supported" tells a
+   * person nothing, while this names the field.
+   */
+  it("refuses a decision schema CALL-E would refuse, and sends nothing", async () => {
+    const api = calleApiStub();
+    const { placer } = placerWith(api);
+
+    await expect(
+      placer.place({
+        ...anIncidentCall(),
+        resultSchema: {
+          type: "object",
+          properties: {
+            action_parameters: {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow(SchemaNotSupportedError);
+    await expect(
+      placer.place({
+        ...anIncidentCall(),
+        resultSchema: { type: "object", additionalProperties: true },
+      }),
+    ).rejects.toThrow(/result_schema allows properties/);
+    expect(api.creates).toHaveLength(0);
+  });
+
+  /**
+   * Their envelope keeps the explanation under `details.reason` and the message bare. The record a
+   * person reads afterwards has to carry the explanation, or the next refusal is diagnosed the way
+   * this one was: from their documentation, by hand, days later.
+   */
+  it("carries CALL-E's own reason and code when they refuse a create", async () => {
+    const api = calleApiStub();
+    const { placer } = placerWith(api);
+    api.rejectCreates(1, 422, "result_schema_invalid", 0, {
+      reason: "additionalProperties must be false",
+    });
+
+    await expect(placer.place(anIncidentCall())).rejects.toThrow(
+      CallRejectedError,
+    );
+    api.rejectCreates(1, 422, "result_schema_invalid", 0, {
+      reason: "additionalProperties must be false",
+    });
+    await expect(placer.place(anIncidentCall())).rejects.toThrow(
+      "CALL-E refused this call task. Their reason: additionalProperties must be false (result_schema_invalid)",
+    );
+  });
+
+  it("reports a refusal that came with no reason as just the message and code", async () => {
+    const api = calleApiStub();
+    const { placer } = placerWith(api);
+    api.rejectCreates(1, 400, "invalid_request");
+
+    await expect(placer.place(anIncidentCall())).rejects.toThrow(
+      "CALL-E refused this call task. (invalid_request)",
+    );
   });
 
   /**

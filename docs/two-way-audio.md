@@ -92,3 +92,37 @@ What the result means:
 
 Either way the guard stays. It is not a workaround for this fault; it is the rule that a decision
 needs somebody to have made it out loud.
+
+## 2026-09-08: refused before it dialled
+
+The balance was topped up on 2026-09-08 and the live test above was attempted with `CALLE_LOCALE`
+and `CALLE_REGION` set. It never rang. CALL-E refused the create with "result_schema is not
+supported", no call task was made, nothing was billed, and the incident closed as
+`call_place_refused`.
+
+The cause was on this side, and it was neither the locale nor the region. CALL-E's extraction
+takes a subset of JSON Schema, spelled out in their API contract from version 0.7.1: `type`,
+`properties`, `required`, `enum`, nested objects, simple array items, `description`, and
+`additionalProperties: false`. It refuses `$ref`, `oneOf`, `anyOf`, `allOf`, format validation and
+`additionalProperties: true`. The decision contract had described `action_parameters` as an object
+with any string keys since 2026-08-22, which is an `additionalProperties` that is neither absent
+nor false. Their message names the field and not the feature; the reason sits under
+`details.reason` in the response, which the adapter did not record.
+
+Three things changed:
+
+- The contract is built per call by `decisionResultSchemaFor` in `src/domain/decision.ts`. It
+  names each value the offered actions ask for as its own text field, and leaves
+  `action_parameters` out when nothing on the call asks for one.
+- `src/calle/schema.ts` holds the check for their supported subset, and both placers run it before
+  anything is stored or sent. The stand-in now refuses what CALL-E refuses, so the suite, which
+  runs the real contract through it, goes red on the old shape. Before this it was green.
+- A refusal from CALL-E is recorded with their `details.reason` and error code, so the next one
+  names its cause in the incident's own record.
+
+What this changes about the table above: nothing. The audio question is still open, because no
+call has yet been placed with the locale and region set. The 23 silent calls were created on
+2026-08-22 and `action_parameters` entered the contract the same day; whether they went out under
+the open-ended shape is not recorded here, and it does not bear on the question, since they
+connected and were transcribed. The live test stands as written, and its next attempt is the first
+one that can answer it.

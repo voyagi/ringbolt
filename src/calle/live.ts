@@ -16,6 +16,7 @@ import {
   type TranscriptTurn,
   usd,
 } from "./port.js";
+import { SchemaNotSupportedError, resultSchemaProblem } from "./schema.js";
 
 /** The SDK hands its transport an already built Request, which is what lets a test drive it. */
 type CalleFetch = (input: Request) => Promise<Response>;
@@ -111,6 +112,21 @@ function rejectedOutright(error: unknown): error is CalleAPIError {
   );
 }
 
+/**
+ * What CALL-E said, with the part that explains it. Their top-level message can be as bare as
+ * "result_schema is not supported." while the reason a person could act on sits under
+ * `details.reason`, which is where the 2026-09-08 refusal kept its cause and where this adapter
+ * never looked. The code rides along because it is what their documentation indexes refusals by.
+ */
+function refusalMessage(error: CalleAPIError): string {
+  const reason = error.details["reason"];
+  const explained =
+    typeof reason === "string" && reason.trim() !== ""
+      ? ` Their reason: ${reason.trim()}`
+      : "";
+  return `${error.message}${explained} (${error.code})`;
+}
+
 export class NumberNotAllowedError extends CallNotAttemptedError {
   constructor() {
     // Deliberately does not repeat the number. This message reaches an audit record and an HTTP
@@ -151,11 +167,12 @@ export class LiveCallPlacer implements CallPlacer {
   }
 
   /**
-   * All three guards are here rather than at any one caller, because this is the line that rings a
+   * All four guards are here rather than at any one caller, because this is the line that rings a
    * real telephone and spends real money, and a caller added later would not know to ask.
    *
    * The number is checked first: a call to somebody who never agreed to be called is worse than a
-   * call one over budget, and refusing it costs nothing. Then the credit, then the rate.
+   * call one over budget, and refusing it costs nothing. Then the schema, which also costs nothing
+   * and names the field CALL-E would have refused it on. Then the credit, then the rate.
    *
    * None of them is a lock. The ledger row is written after CALL-E accepts, so calls still in
    * flight are not counted yet and a simultaneous burst can overshoot by however many are in the
@@ -165,6 +182,10 @@ export class LiveCallPlacer implements CallPlacer {
   async place(input: PlaceCallInput): Promise<CallSnapshot> {
     if (!this.allowedNumbers.has(input.phone))
       throw new NumberNotAllowedError();
+
+    const schemaProblem = resultSchemaProblem(input.resultSchema);
+    if (schemaProblem !== null)
+      throw new SchemaNotSupportedError(schemaProblem);
 
     const spent = await this.budget.spent();
     if ((spent + 1) * CALL_PRICE_USD > this.budget.creditUsd)
@@ -197,7 +218,7 @@ export class LiveCallPlacer implements CallPlacer {
       // Their refusal is turned into ours here, at the line that knows what the SDK throws, so that
       // nothing further out has to know about HTTP status codes to tell a refusal from a maybe.
       if (rejectedOutright(error))
-        throw new CallRejectedError(error.status, error.message);
+        throw new CallRejectedError(error.status, refusalMessage(error));
       throw error;
     }
   }

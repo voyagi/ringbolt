@@ -87,13 +87,16 @@ export type CalleApiStub = {
    * sentence?", so it is a shape this adapter meets rather than one invented for a test.
    *
    * `after` lets the refusals start later than the next create, which is how the case where one
-   * send reaches the wire and the retry is refused gets expressed at all.
+   * send reaches the wire and the retry is refused gets expressed at all. `details` is the object
+   * the real envelope carries beside the message; on a refused schema the reason lives there, under
+   * `reason`, and the top-level message says only that the schema is not supported.
    */
   rejectCreates(
     count: number,
     status: number,
     code: string,
     after?: number,
+    details?: Record<string, unknown>,
   ): void;
 };
 
@@ -103,7 +106,13 @@ export function calleApiStub(): CalleApiStub {
   const creates: RecordedCreate[] = [];
   let placed = 0;
   let answersToDrop = 0;
-  let rejections = { count: 0, status: 422, code: "invalid_request", after: 0 };
+  let rejections = {
+    count: 0,
+    status: 422,
+    code: "invalid_request",
+    after: 0,
+    details: {} as Record<string, unknown>,
+  };
 
   /**
    * POST /v1/calls, answered the way the real API answers it. Records what went onto the wire, then
@@ -129,6 +138,7 @@ export function calleApiStub(): CalleApiStub {
         rejections.status,
         rejections.code,
         "CALL-E refused this call task.",
+        rejections.details,
       );
     }
 
@@ -167,8 +177,8 @@ export function calleApiStub(): CalleApiStub {
     dropAnswers(count) {
       answersToDrop = count;
     },
-    rejectCreates(count, status, code, after = 0) {
-      rejections = { count, status, code, after };
+    rejectCreates(count, status, code, after = 0, details = {}) {
+      rejections = { count, status, code, after, details };
     },
     settle(callId, patch) {
       const call = calls.get(callId);
@@ -275,6 +285,11 @@ function json(status: number, payload: unknown): Response {
 }
 
 /** The envelope the SDK reads to build its error classes. */
-function apiError(status: number, code: string, message: string): Response {
-  return json(status, { error: { code, message, details: {} } });
+function apiError(
+  status: number,
+  code: string,
+  message: string,
+  details: Record<string, unknown> = {},
+): Response {
+  return json(status, { error: { code, message, details } });
 }

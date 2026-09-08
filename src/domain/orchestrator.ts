@@ -15,7 +15,7 @@ import {
   type Refusal,
   type SpokenDecision,
   authorize,
-  decisionResultSchema,
+  decisionResultSchemaFor,
 } from "./decision.js";
 import {
   type AlertPayload,
@@ -637,7 +637,7 @@ export class Orchestrator {
     const request: PlaceCallInput = {
       phone: contact.phone,
       task: buildTask(incident, offered, this.deps.now()),
-      resultSchema: decisionResultSchema as unknown as Record<string, unknown>,
+      resultSchema: decisionResultSchemaFor(offered),
       metadata: { incident_id: incident.id, service: incident.service },
       webhookUrl: `${this.deps.publicBaseUrl}/webhooks/calle`,
       // One key per attempt, and the same key on every send of that attempt. The next person in the
