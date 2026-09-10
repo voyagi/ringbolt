@@ -190,6 +190,11 @@ npm run db:migrate:local
 npm run dev
 ```
 
+Starting the server writes `.dev.vars` from `.env.example` if you do not have one. That file is
+where wrangler reads local settings and it is never committed, so without it the local server would
+fall back to the deployed configuration and refuse the requests below. Open it when you want to
+point Ringbolt at a real telephone; `.env.example` explains every value.
+
 Use `npm run dev:scheduled` instead if you want to trigger the reconciliation sweep by hand at
 `/__scheduled`, which is how you watch a lost webhook get recovered without waiting for the cron.
 
