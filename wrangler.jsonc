@@ -32,20 +32,88 @@
   ],
   "d1_databases": [
     {
+      // The binding is what the code reads as `env.DB`, so it is not free to rename. `wrangler d1
+      // create` offers to write this block itself and defaults the binding to the database's own
+      // name, which appends a SECOND entry for the same database under the wrong label.
       "binding": "DB",
       "database_name": "ringbolt",
-      // Replaced by the real id from `wrangler d1 create ringbolt`. Local development ignores it.
-      "database_id": "local-development-placeholder"
+      // Created 2026-09-10 with `--location=weur`, so the primary sits in western Europe: this
+      // database holds telephone numbers and transcripts. Local development ignores the value and
+      // uses its own copy on disk.
+      "database_id": "a4b29b53-6783-47ea-933d-7fa4c7d48658"
     }
   ],
+  // Its own hostname on a zone in the same account. The workers.dev subdomain is account wide and
+  // shared with unrelated Workers, so it cannot be renamed without breaking their addresses, and
+  // this file is published with the repository. Cloudflare writes the DNS record and issues the
+  // certificate on deploy.
+  "routes": [{ "pattern": "ringbolt-ops.taranity.com", "custom_domain": true }],
+  // Both are stated rather than left out. Wrangler turns them off by DEFAULT once a route exists,
+  // and a default is not a decision: the workers.dev subdomain is derived from a personal email
+  // address, so it must never come back because a later version changed its mind about defaults.
+  "workers_dev": false,
+  "preview_urls": false,
   // The reconciliation sweep. A CALL-E webhook that never lands would otherwise leave an incident
   // waiting on its call for ever, and an incident that is still open answers every later repeat of
   // that alert as a duplicate, so one lost delivery would quietly retire a service's alerts.
   "triggers": { "crons": ["* * * * *"] },
   "observability": { "enabled": true },
+  // These are the DEPLOYED settings. Local development reads `.dev.vars` instead, which sets
+  // `RINGBOLT_ENV=development` and points `PUBLIC_BASE_URL` back at localhost, so running a server
+  // on this machine is unaffected by anything here.
+  //
+  // `production` is load bearing rather than cosmetic: in `development` the dashboard and the
+  // configuration endpoints serve with no token at all, and the intake accepts any word in its
+  // URL. A deployment carrying `development` would publish an operator's whole estate.
   "vars": {
-    "RINGBOLT_ENV": "development",
+    "RINGBOLT_ENV": "production",
     "CALLE_MODE": "fake",
-    "PUBLIC_BASE_URL": "http://localhost:8787"
+    // Where CALL-E delivers the outcome of a call, so it has to be this deployment's own address.
+    // A wrong value costs a delivery and the sweep picks the call up a few minutes later.
+    "PUBLIC_BASE_URL": "https://ringbolt-ops.taranity.com"
+  },
+  // THE PUBLIC DEMO, deployed with `--env demo` and named `ringbolt-demo` automatically. It is a
+  // separate Worker with a SEPARATE DATABASE, and that is the point rather than the tidiness: a
+  // public demo publishes everything it holds, transcripts and the names of whoever authorised an
+  // action included, so one pointed at the real database would publish real incidents.
+  //
+  // Bindings and variables are not inherited by an environment and have to be repeated here.
+  // Routes ARE inherited, so this block declares its own: without them the demo would inherit
+  // `ringbolt-ops.taranity.com` and take that hostname off the private deployment.
+  //
+  // No secrets are set on this deployment on purpose. `DEMO_MODE` stands the admin guard down so a
+  // stranger can read the board, its own controls go through the orchestrator rather than the
+  // intake, and with no `INTAKE_TOKEN` the intake endpoint refuses everything.
+  "env": {
+    "demo": {
+      "routes": [{ "pattern": "ringbolt.taranity.com", "custom_domain": true }],
+      "workers_dev": false,
+      "preview_urls": false,
+      "vars": {
+        "RINGBOLT_ENV": "production",
+        // `DEMO_MODE` with `CALLE_MODE=live` is a configuration error and the deployment refuses
+        // to serve at all, so this pair is what keeps a public page off the telephone.
+        "CALLE_MODE": "fake",
+        "DEMO_MODE": "true",
+        // The stand-in's default of 1200ms resolves the whole loop faster than anybody can read
+        // it: a visitor presses the control and sees the service blink from failing to serving
+        // with the call, the authorisation and the rollback invisible in between. Twelve seconds
+        // is long enough to watch the ring count and open the record while the call is still on,
+        // and it stays well inside the 30 seconds the runtime allows a Worker to keep working
+        // after its response, which is the timer the stand-in resolves the call on.
+        "CALLE_FAKE_DELAY_MS": "12000",
+        "PUBLIC_BASE_URL": "https://ringbolt.taranity.com"
+      },
+      "durable_objects": {
+        "bindings": [{ "name": "INCIDENT", "class_name": "IncidentDurableObject" }]
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ringbolt-demo",
+          "database_id": "b1757ce3-42ef-493c-92b0-08834facc95d"
+        }
+      ]
+    }
   }
 }
