@@ -153,3 +153,38 @@ What changed in the code: a call's record now carries the sentence CALL-E writes
 code, so the next refusal explains itself on the incident page. This one read "The call ended."
 while the sentence above sat unread in the API response, and it took a read by hand to learn why
 nobody was called.
+
+## 2026-09-10, CALL-E's answer: the question stays open, and not by our choice
+
+The refusal was reported to CALL-E on two channels: a public issue on their integrations tracker
+(number 121, where a repository collaborator marked it P1 the following night and asked their
+platform owner to audit the billing path) and an email to their support address carrying the account
+details the public issue deliberately left out. Support answered on 2026-09-10:
+
+> Netherlands/English is blocked for the setup you reported. We cannot confirm an available language
+> for Dutch destinations or restoration by September 13, so please plan around that limitation.
+
+They pointed at their own documentation, which does say it. Read on 2026-09-10, the region page
+still lists the Netherlands with English in the International tier, under the sentence "Some
+destinations listed below may be temporarily restricted". So the table is not wrong so much as
+incomplete: it publishes what is offered and not what is currently reachable. On this task the
+difference showed up only once the task had been created and come back failed, and not when it was
+asked for. That is one observation and not a rule about their API.
+
+They also asked that the task not be retried, and said they have not yet verified the charge or a
+reversal for the task that never dialled. So whether this particular one was billed is not settled
+either, and this document does not treat it as spent money until they say so.
+
+**What that settles.** The question at the top of this document cannot be answered here. Answering
+it needs a call that reaches a Dutch telephone, CALL-E would not confirm that the route would be
+restored by September 13, and they asked that the task not be retried. That is not the same as a
+promise that it stays down, and it is enough to close the question for this entry rather than leave
+it waiting on a call nobody can schedule. The 23 silent calls of 2026-08-22 keep the reading given
+above, which is a plausible explanation and not a proven one, and this document will not claim more
+than that.
+
+**What it does not touch.** Every rule the calls were placed under held while the provider failed.
+Ringbolt refused to act on a call that never happened, closed the incident, and now writes the
+provider's own sentence onto the incident's record instead of "The call ended." A product whose
+whole argument is that it will not act on words nobody said has to behave that way when its
+telephone line is the thing that breaks, and that is the part this episode actually tested.
