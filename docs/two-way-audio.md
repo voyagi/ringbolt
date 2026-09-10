@@ -167,8 +167,9 @@ details the public issue deliberately left out. Support answered on 2026-09-10:
 They pointed at their own documentation, which does say it. Read on 2026-09-10, the region page
 still lists the Netherlands with English in the International tier, under the sentence "Some
 destinations listed below may be temporarily restricted". So the table is not wrong so much as
-incomplete: it publishes what is offered and not what is currently reachable, and the difference is
-only visible once a task has been created and has come back failed, never at the moment of asking.
+incomplete: it publishes what is offered and not what is currently reachable. On this task the
+difference showed up only once the task had been created and come back failed, and not when it was
+asked for. That is one observation and not a rule about their API.
 
 They also asked that the task not be retried, and said they have not yet verified the charge or a
 reversal for the task that never dialled. So whether this particular one was billed is not settled
