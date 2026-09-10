@@ -153,3 +153,33 @@ What changed in the code: a call's record now carries the sentence CALL-E writes
 code, so the next refusal explains itself on the incident page. This one read "The call ended."
 while the sentence above sat unread in the API response, and it took a read by hand to learn why
 nobody was called.
+
+## 2026-09-10, CALL-E's answer: the question stays open, and not by our choice
+
+The refusal was reported to CALL-E on two channels: a public issue on their integrations tracker
+(number 121, where a repository collaborator marked it P1 the following night and asked their
+platform owner to audit the billing path) and an email to their support address carrying the account
+details the public issue deliberately left out. Support answered on 2026-09-10:
+
+> Netherlands/English is blocked for the setup you reported. We cannot confirm an available language
+> for Dutch destinations or restoration by September 13, so please plan around that limitation.
+
+They pointed at their own documentation, which does say it. Read on 2026-09-10, the region page
+still lists the Netherlands with English in the International tier, under the sentence "Some
+destinations listed below may be temporarily restricted". So the table is not wrong so much as
+incomplete: it publishes what is offered and not what is currently reachable, and the difference is
+only visible after a task has been created and billed.
+
+They also asked that the task not be retried, and said they have not yet verified the charge or a
+reversal for a task that never dialled.
+
+**What that settles.** The question at the top of this document cannot be answered. Not "not yet":
+answering it needs a call that reaches a Dutch telephone, and the provider has said that will not
+happen in this window. The 23 silent calls of 2026-08-22 keep the reading given above, which is a
+plausible explanation and not a proven one, and this document will not claim more than that.
+
+**What it does not touch.** Every rule the calls were placed under held while the provider failed.
+Ringbolt refused to act on a call that never happened, closed the incident, and now writes the
+provider's own sentence onto the incident's record instead of "The call ended." A product whose
+whole argument is that it will not act on words nobody said has to behave that way when its
+telephone line is the thing that breaks, and that is the part this episode actually tested.
