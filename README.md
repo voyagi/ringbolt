@@ -562,11 +562,13 @@ same contract suite as the stand-in.
 One thing has not been proven on a real telephone, and this is the place to say so rather than
 leave it to be discovered: no call this product has placed has yet been a two way conversation.
 Ringbolt was heard on all of them and the responder was not. The product's answer to that is to
-refuse to act on such a call, which is tested. The cause now sits with the telephone provider: they
-confirmed on 2026-09-10 that calls to Dutch numbers in English are blocked for this setup, could
-not confirm when the route would return, and asked that the task not be retried, so the question
-cannot be settled from here for now. `docs/two-way-audio.md` carries every attempt, the provider's
-own words, and exactly how far the evidence goes.
+refuse to act on such a call, which is tested. **The cause is still unproven.** What changed on
+2026-09-10 is that it cannot be settled here for now: the telephone provider confirmed that calls
+to Dutch numbers in English are blocked for this setup, could not confirm when the route returns,
+and asked that the task not be retried, so the diagnostic call that would answer the question
+cannot be placed. Whether that block also explains the earlier calls is consistent with them and
+not proven, and `docs/two-way-audio.md` carries every attempt, the provider's own words, and
+exactly how far the evidence goes without going further.
 
 The demo runs on a deployed Worker: a stranger can open a `DEMO_MODE` deployment, break the demo
 service, and watch the whole loop from the alert to the rollback, with no way to make a telephone
