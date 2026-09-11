@@ -5,6 +5,13 @@ them, and then carries out the fix they authorize out loud.
 
 A ringbolt is the iron ring bolted into a quay that a ship ties to in a storm.
 
+**See it run: [ringbolt.taranity.com](https://ringbolt.taranity.com)**, a public demo with no
+install and no account. Press the control on `/demo` and a release breaks a service, an alert
+arrives, policy decides it is worth waking somebody, a call goes out to whoever is on the rota, the
+spoken authorization is verified against the transcript, and the release is rolled back. That
+deployment answers calls with the local stand-in rather than dialling, so nothing on it can make a
+telephone ring.
+
 ## Why this exists
 
 Every on-call tool can already phone you. None of them can have a conversation.
@@ -196,7 +203,8 @@ fall back to the deployed configuration and refuse the requests below. Open it w
 point Ringbolt at a real telephone; `.env.example` explains every value.
 
 Use `npm run dev:scheduled` instead if you want to trigger the reconciliation sweep by hand at
-`/__scheduled`, which is how you watch a lost webhook get recovered without waiting for the cron.
+`/cdn-cgi/local/scheduled`, which is how you watch a lost webhook get recovered without waiting for
+the cron.
 
 That starts against a local stand-in for CALL-E, so nothing dials a telephone. Fire an alert at
 it:
@@ -540,24 +548,26 @@ rule that would still report clean.
 
 ## Status
 
-The loop runs end to end against the local stand-in: an alert becomes an incident, policy decides
-whether it is worth a call, a call is placed to whoever is on the rota, the decision that comes back
-is verified and authorized, the authorized action changes a real system and is checked afterwards,
-and a call nobody answers moves to the next person on a timer. Actions are configuration, so what
-can be authorized on a call is something an operator writes down rather than something a deploy
-decides. The CALL-E adapter is built and switchable on, and it satisfies the same contract suite as
-the stand-in.
+The loop runs end to end, on this machine and on a deployed Worker: an alert becomes an incident,
+policy decides whether it is worth a call, a call is placed to whoever is on the rota, the decision
+that comes back is verified and authorized, the authorized action changes a real system and is
+checked afterwards, and a call nobody answers moves to the next person on a timer. Actions are
+configuration, so what can be authorized on a call is something an operator writes down rather than
+something a deploy decides. The CALL-E adapter is built and switchable on, and it satisfies the
+same contract suite as the stand-in.
 
 One thing has not been proven on a real telephone, and this is the place to say so rather than
 leave it to be discovered: no call this product has placed has yet been a two way conversation.
 Ringbolt was heard on all of them and the responder was not. The product's answer to that is to
-refuse to act on such a call, which is tested; the cause is still open, and
-`docs/two-way-audio.md` says exactly how far the evidence goes and what the next live call would
-settle.
+refuse to act on such a call, which is tested. The cause now sits with the telephone provider: they
+confirmed on 2026-09-10 that calls to Dutch numbers in English are blocked for this setup, could
+not confirm when the route would return, and asked that the task not be retried, so the question
+cannot be settled from here for now. `docs/two-way-audio.md` carries every attempt, the provider's
+own words, and exactly how far the evidence goes.
 
-The demo runs too: a stranger can open a `DEMO_MODE` deployment, break the demo service, and watch
-the whole loop from the alert to the rollback, with no way to make a telephone ring and no write
-that reaches anything else.
+The demo runs on a deployed Worker: a stranger can open a `DEMO_MODE` deployment, break the demo
+service, and watch the whole loop from the alert to the rollback, with no way to make a telephone
+ring and no write that reaches anything else.
 
 Everything that says anything about a production estate or a person is behind `ADMIN_TOKEN`, which
 is one shared token rather than accounts. That is a decision rather than an unfinished job, and

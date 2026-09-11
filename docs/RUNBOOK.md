@@ -122,8 +122,10 @@ of three calls in ten minutes, and a number that is not on `LIVE_CALL_ALLOWLIST`
 
 **A call was placed and the incident never moved.** The webhook did not arrive or could not be
 processed. The cron sweep recovers this within a minute or two on its own. To force it in
-development, `npm run dev:scheduled` and hit `/__scheduled`. If it recurs, `PUBLIC_BASE_URL` is
-probably not the deployed URL.
+development, `npm run dev:scheduled` and hit `/cdn-cgi/local/scheduled`, which is the address
+wrangler exposes for a cron trigger. It answers ahead of the static assets, so the dashboard's
+single-page fallback cannot swallow it. If it recurs, `PUBLIC_BASE_URL` is probably not the
+deployed URL.
 
 **An incident says `call_outcome_unknown`.** A create was sent twice under one idempotency key and
 neither send could be settled, so a call may exist that Ringbolt cannot see. Check the CALL-E
