@@ -97,8 +97,8 @@ export function severityAtLeast(severity: Severity, floor: Severity): boolean {
 
 /**
  * The five colours of the instrument panel, plus the neutral. Each one means one state of the
- * world, never a decoration, which is the rule `design/ART-DIRECTION.md` sets and the reason the
- * mapping lives in one function instead of in whichever component needed a colour.
+ * world, never a decoration, which is why the mapping lives in one function instead of in
+ * whichever component happened to need a colour.
  */
 export const tones = [
   "live",
