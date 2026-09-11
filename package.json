@@ -10,9 +10,9 @@
   },
   "scripts": {
     "build": "vite build",
-    "dev": "npm run build && wrangler dev",
+    "dev": "node scripts/ensure-dev-vars.mjs && npm run build && wrangler dev",
     "dev:client": "vite --no-open",
-    "dev:scheduled": "wrangler dev --test-scheduled",
+    "dev:scheduled": "node scripts/ensure-dev-vars.mjs && wrangler dev --test-scheduled",
     "deploy": "npm run build && wrangler deploy",
     "test": "vitest run",
     "test:watch": "vitest",

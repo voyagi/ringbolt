@@ -75,6 +75,27 @@ describe("the test environment itself", () => {
       "actions.ringbolt.test",
     ]);
   });
+
+  /**
+   * Added 2026-09-10, after the deployed configuration started saying `production` and the whole
+   * configuration API answered 503 in CI while every local run stayed green. The difference was
+   * `.dev.vars`, which exists on a developer's machine and nowhere else, so the suite was reading
+   * its environment from an untracked file. Tests that want `production` set it themselves.
+   */
+  it("runs in development however the deployed configuration is set", () => {
+    expect(readConfig(env).RINGBOLT_ENV).toBe("development");
+  });
+
+  /**
+   * The sharper half of the same fix. The stand-in delivers its webhook to this address and the
+   * helpers in `test/support/webhook.ts` are written around nothing listening there. Inherited
+   * from the deployed configuration it would have been a live deployment, so a test run would have
+   * posted call outcomes at production. `.test` is reserved and resolves nowhere.
+   */
+  it("reports call outcomes to somewhere that cannot exist", () => {
+    const configured = new URL(readConfig(env).PUBLIC_BASE_URL);
+    expect(configured.hostname.endsWith(".test")).toBe(true);
+  });
 });
 
 describe("reading the configuration", () => {

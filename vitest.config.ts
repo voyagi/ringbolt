@@ -32,6 +32,19 @@ export default defineConfig({
           CALLE_CREDIT_USD: "0",
           // The stand-in's think time only exists so a demo looks like a real call.
           CALLE_FAKE_DELAY_MS: "20",
+          // Fifth layer, and the one that was missing on 2026-09-10: everything above pins a value
+          // the suite must not inherit, and then the suite inherited the two that decide who may
+          // read an estate and where a call reports back to. Both came from `.dev.vars` on a
+          // developer's machine and from `wrangler.jsonc` everywhere else, so the day the deployed
+          // configuration said `production` the whole configuration API answered 503 in CI while
+          // every local run stayed green. A suite that passes only where an untracked file exists
+          // is not a suite. Tests that need `production` set it themselves, per test.
+          RINGBOLT_ENV: "development",
+          // The same fix, and the sharper half of it. The stand-in delivers its webhook to
+          // PUBLIC_BASE_URL, and `test/support/webhook.ts` is written around nothing listening
+          // there. Inheriting the deployed value would have pointed that delivery at the live
+          // deployment. `.test` is reserved and never resolves, so it cannot reach anything.
+          PUBLIC_BASE_URL: "https://webhooks.ringbolt.test",
           INTAKE_TOKEN: "test-dummy-intake-token-0123456789",
           // The same idea one layer out. A runbook action is a row in a table, and a test can write
           // one, so the suite pins the only host any action it defines is allowed to reach. That
