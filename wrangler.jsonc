@@ -102,6 +102,14 @@
         // and it stays well inside the 30 seconds the runtime allows a Worker to keep working
         // after its response, which is the timer the stand-in resolves the call on.
         "CALLE_FAKE_DELAY_MS": "12000",
+        // The sweep erases a transcript's words thirty days after the call by default, which is
+        // right for recordings of real people and wrong for a seeded estate: the example history
+        // is stamped minutes old when it is seeded, so a month later every transcript on the demo
+        // is empty, including the one whose marked sentence is the whole demonstration. This
+        // deployment holds only fictional contacts and whatever a visitor rehearses with the
+        // stand-in, and Settings reads the window back, so a year is stated rather than hidden.
+        // A real deployment keeps the default.
+        "RETENTION_TRANSCRIPT_DAYS": "365",
         "PUBLIC_BASE_URL": "https://ringbolt.taranity.com"
       },
       "durable_objects": {
