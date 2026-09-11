@@ -56,8 +56,8 @@ that set it, and it wakes an incident by calling the identical code the alarm wo
 Nothing an incident can do leaves it stuck, because an incident that is stuck is an alert that has
 silently stopped ringing.
 
-Every step of that list runs. What is still ahead of the code is the screens rather than the
-mechanism, and the Status section below says exactly where.
+Every step of that list runs, and the screens behind it are built and audited. What is not finished
+is named in the Status section at the end rather than left for you to find out.
 
 ## One broken thing is one phone call
 
@@ -460,8 +460,11 @@ A service with no rotation of its own uses the shared one, named `*`. With no ro
 rota to be built before it can do anything.
 
 Those endpoints decide whose telephone rings, so outside development they refuse to serve until
-`ADMIN_TOKEN` is set, and then require it as a bearer token. That is a floor rather than the
-finished answer: real authentication is still ahead, and the Status section says so.
+`ADMIN_TOKEN` is set, and then require it as a bearer token. One shared token rather than accounts
+is a decision with its reasons and its costs written out in `docs/adr/0002-tenancy.md`, not an
+unfinished account system: the unit of tenancy here is the deployment. What it costs is that a
+deployment cannot tell two of its own operators apart, and revoking one person means rotating the
+token.
 
 ## The local stand-in
 
