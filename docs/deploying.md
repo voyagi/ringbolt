@@ -158,7 +158,7 @@ takes. Three things are worth knowing before the first deploy rather than after 
 restore window, 7 days on the free plan and 30 on a paid one, verified on Cloudflare's own
 documentation on 2026-08-24. It covers a bad migration or a wrong delete. It does not cover losing
 the account, which is what `.github/workflows/d1-backup.yml` is for, and that workflow stays off
-until you set `D1_BACKUP_ENABLED` and a token.
+until you set `D1_BACKUP_ENABLED`, a token, and the `D1_BACKUP_PUBLIC_KEY` the dump is encrypted to.
 
 **Rehearse the restore before you need it.** `node scripts/restore-rehearsal.mjs` runs the whole
 loss and recovery against the local database and prints how long each step took. On 2026-08-24, with
