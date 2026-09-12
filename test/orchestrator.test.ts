@@ -18,6 +18,7 @@ import {
   unscheduledWakes,
 } from "../src/worker/wiring.js";
 import { testActions } from "./support/actions.js";
+import { callIdWaitingOn } from "./support/call-id.js";
 import { resetTables } from "./support/reset.js";
 
 const alert: AlertPayload = {
@@ -32,9 +33,14 @@ const ADMIN_TOKEN = "a-long-enough-dummy-admin-token";
  * Branded the way verifyCall brands a checked API response: a CallSnapshot, then the cast. The
  * tests write the snapshot themselves, so nothing else can put the brand on it.
  */
-function snapshotFor(incident: Incident, decision: unknown): VerifiedCall {
+async function snapshotFor(
+  incident: Incident,
+  decision: unknown,
+): Promise<VerifiedCall> {
   const snapshot: CallSnapshot = {
-    id: "call_stub",
+    // The call the incident is actually waiting on, not an invented id: `beginDeciding` compares
+    // the two, so a made-up one is a delivery for a call this incident never placed.
+    id: await callIdWaitingOn(env.DB, incident.id),
     status: "completed",
     taskCompleted: true,
     confidenceScore: 0.94,
@@ -126,7 +132,10 @@ describe("what the responder said decides where the incident lands", () => {
   it("holds only when the responder asked for a hold", async () => {
     const incident = await anIncidentWaitingOnADecision();
     await orchestratorWith(stubPlacer("fake")).onCallTerminal(
-      snapshotFor(incident, { decision: "hold", reason: "leave it running" }),
+      await snapshotFor(incident, {
+        decision: "hold",
+        reason: "leave it running",
+      }),
     );
     expect((await stateOf(incident.id)).state).toBe("held");
   });
@@ -143,7 +152,10 @@ describe("what the responder said decides where the incident lands", () => {
   it("escalates when the responder asked to, and closes when there is nobody else", async () => {
     const incident = await anIncidentWaitingOnADecision();
     await orchestratorWith(stubPlacer("fake")).onCallTerminal(
-      snapshotFor(incident, { decision: "escalate", reason: "not my system" }),
+      await snapshotFor(incident, {
+        decision: "escalate",
+        reason: "not my system",
+      }),
     );
 
     const after = await stateOf(incident.id);
@@ -161,7 +173,10 @@ describe("what the responder said decides where the incident lands", () => {
     const incident = await anIncidentWaitingOnADecision();
     const before = Date.now();
     await orchestratorWith(stubPlacer("fake")).onCallTerminal(
-      snapshotFor(incident, { decision: "snooze", snooze_minutes: 45 }),
+      await snapshotFor(incident, {
+        decision: "snooze",
+        snooze_minutes: 45,
+      }),
     );
 
     const snoozed = await stateOf(incident.id);
@@ -183,10 +198,10 @@ describe("what the responder said decides where the incident lands", () => {
   it("ignores a snapshot for a call that has not finished", async () => {
     const incident = await anIncidentWaitingOnADecision();
     const running = {
-      ...snapshotFor(incident, {
+      ...(await snapshotFor(incident, {
         decision: "run_action",
         action_id: "kill_switch",
-      }),
+      })),
       status: "in_progress" as const,
     } as VerifiedCall;
 
@@ -202,7 +217,7 @@ describe("what the responder said decides where the incident lands", () => {
    */
   it("sends a decision below the confidence floor to the rotation", async () => {
     const incident = await anIncidentWaitingOnADecision();
-    const snapshot = snapshotFor(incident, { decision: "run_action" });
+    const snapshot = await snapshotFor(incident, { decision: "run_action" });
     await orchestratorWith(stubPlacer("fake")).onCallTerminal({
       ...snapshot,
       confidenceScore: 0.2,
@@ -234,7 +249,7 @@ describe("what the responder said decides where the incident lands", () => {
       .run();
 
     await orchestratorWith(stubPlacer("fake")).onCallTerminal(
-      snapshotFor(incident, {
+      await snapshotFor(incident, {
         decision: "run_action",
         action_id: "kill_switch",
       }),
@@ -262,7 +277,10 @@ describe("what the responder said decides where the incident lands", () => {
   it("a snoozed incident still collapses a repeat of the same alert", async () => {
     const incident = await anIncidentWaitingOnADecision();
     await orchestratorWith(stubPlacer("fake")).onCallTerminal(
-      snapshotFor(incident, { decision: "snooze", snooze_minutes: 45 }),
+      await snapshotFor(incident, {
+        decision: "snooze",
+        snooze_minutes: 45,
+      }),
     );
 
     const repeat = await buildOrchestrator(env, readConfig(env), {

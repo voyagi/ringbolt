@@ -182,9 +182,11 @@ export class Orchestrator {
     const incidentId = incidentIdOf(snapshot);
     if (incidentId === null) return;
 
-    // As in open(), no await before the section is entered.
+    // As in open(), no await before the section is entered. The call's own id goes in with the
+    // incident's: this snapshot is only allowed to decide the call the incident is actually waiting
+    // on, and a superseded one has to leave the current call's move where it found it.
     const incident = await this.deps.exclusive(() =>
-      this.beginDeciding(incidentId),
+      this.beginDeciding(incidentId, snapshot.id),
     );
     if (incident === null) return;
 
@@ -990,9 +992,31 @@ export class Orchestrator {
     );
   }
 
-  private async beginDeciding(incidentId: string): Promise<Incident | null> {
+  /**
+   * Claims the incident's one move out of `calling` for a named call, or null when this call is not
+   * the one the incident is waiting on.
+   *
+   * The call id is checked as well as the state, because the state alone does not say WHICH call.
+   * An incident goes back into `calling` every time it escalates, and nothing cancels the previous
+   * call at the provider, so a conversation that outran `GIVE_UP_AFTER_MS` can still deliver its
+   * outcome after the next person has been rung. The state test passes for that delivery. Without
+   * the id test three things then go wrong at once: the earlier responder's decision runs an action
+   * against an offer the current call put up, the audit record names the current contact as the
+   * person who authorized it, and the responder who is on the telephone at that moment has their
+   * own answer dropped, because this move has already been spent.
+   *
+   * Both reads happen inside the caller's exclusive section, so the row this compares against is
+   * the row it then writes. `dial` puts the id on the incident before the provider can deliver
+   * anything, which is why an equality test is safe for the ordinary path rather than racy: a
+   * delivery that arrives with no id yet recorded belongs to some other call by construction.
+   */
+  private async beginDeciding(
+    incidentId: string,
+    callId: string,
+  ): Promise<Incident | null> {
     const incident = await this.deps.repo.getIncident(incidentId);
     if (incident === null || incident.state !== "calling") return null;
+    if (incident.callId !== callId) return null;
 
     const at = this.deps.now().toISOString();
     const state = transition(incident.state, "deciding");
