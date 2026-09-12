@@ -351,6 +351,17 @@ app.use("/api/config/*", adminOnly);
 // behind a production change. Neither belongs on the open read API.
 app.use("/api/audit/*", adminOnly);
 
+// The call ledger's totals are the same block the board serves, and it was left open when the board
+// was closed. On a live deployment the count of real calls goes up every time Ringbolt telephones
+// somebody, so an anonymous caller polling it watches an operator's estate have an incident, and
+// reads how close the spending ceiling is to refusing every further call. The board and this route
+// publish the same figures, so they are behind the same token.
+//
+// The wildcard covers the bare `/api/budget`, which is the whole route today. That is a property of
+// the router rather than something obvious from reading it, so `test/orchestrator.test.ts` asserts
+// the refusal on the bare path rather than assuming it.
+app.use("/api/budget/*", adminOnly);
+
 // These two were open until 2026-08-25, from the walking skeleton, when the whole product was a
 // curl and a page. What they publish is what is broken in somebody's estate right now, which
 // service, how bad, and how far Ringbolt has got with it, and that is not a public fact about

@@ -1,5 +1,5 @@
 import { SELF, env } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type CallPlacer,
   type CallSnapshot,
@@ -25,6 +25,8 @@ const alert: AlertPayload = {
   title: "Payment errors above 20 percent",
   severity: "critical",
 };
+
+const ADMIN_TOKEN = "a-long-enough-dummy-admin-token";
 
 /**
  * Branded the way verifyCall brands a checked API response: a CallSnapshot, then the cast. The
@@ -365,6 +367,34 @@ describe("a telephone that will not dial", () => {
 describe("the real-call budget", () => {
   beforeEach(async () => {
     await resetTables(env.DB);
+  });
+
+  afterEach(() => {
+    delete env.ADMIN_TOKEN;
+  });
+
+  /**
+   * The ledger says what has been spent and, in live mode, moves every time Ringbolt telephones
+   * somebody: a stranger polling it watches an operator's estate have an incident, and reads how
+   * close the ceiling is to refusing every further call. `/api/audit/board` has served the same
+   * figures behind the token since 2026-08-25 and this route was left open beside it.
+   *
+   * The bare path is asserted rather than assumed, because the guard is registered as a wildcard and
+   * whether that covers the path itself is a property of the router. The same question on
+   * `/api/demo` cost a failing test to answer.
+   */
+  it("is not readable without the admin token", async () => {
+    env.ADMIN_TOKEN = ADMIN_TOKEN;
+
+    expect((await SELF.fetch("https://ringbolt.test/api/budget")).status).toBe(
+      401,
+    );
+
+    const allowed = await SELF.fetch("https://ringbolt.test/api/budget", {
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
+    });
+    expect(allowed.status).toBe(200);
+    expect(await allowed.json()).toMatchObject({ realCallsPlaced: 0 });
   });
 
   it("counts what a call placed by a real placer costs", async () => {
