@@ -118,4 +118,66 @@ describe("a delivery for a call the incident has moved on from", () => {
     const incident = await new Repo(env.DB).getIncident(incidentId);
     expect(incident?.state).not.toBe("calling");
   });
+
+  /**
+   * The window the id alone cannot cover, and the reason the attempt is sent with the call.
+   *
+   * A create that times out does not cancel a call CALL-E already accepted, so somebody can be on
+   * the telephone about this incident while the id of their call has never reached us and
+   * `callId` is still null. An earlier version of this guard refused every delivery arriving in
+   * that state, which threw away the one thing the product exists to capture.
+   */
+  describe("while the call is placed but its id has not come back", () => {
+    async function theIdHasNotComeBackYet(incidentId: string): Promise<void> {
+      await env.DB.prepare(`UPDATE incidents SET call_id = NULL WHERE id = ?1`)
+        .bind(incidentId)
+        .run();
+    }
+
+    it("is acted on when it reports the attempt the incident is on", async () => {
+      const { incidentId, snapshot } = await callWaitingOnADecision();
+      await theIdHasNotComeBackYet(incidentId);
+
+      await orchestrator().onCallTerminal(snapshot);
+
+      expect(await countOf("call_records")).toBe(1);
+      const incident = await new Repo(env.DB).getIncident(incidentId);
+      expect(incident?.state).not.toBe("calling");
+    });
+
+    it("is still ignored when it reports an earlier attempt", async () => {
+      const { incidentId, snapshot } = await callWaitingOnADecision();
+      await theIdHasNotComeBackYet(incidentId);
+      await env.DB.prepare(
+        `UPDATE incidents SET call_attempts = 4 WHERE id = ?1`,
+      )
+        .bind(incidentId)
+        .run();
+
+      await orchestrator().onCallTerminal(snapshot);
+
+      expect(await countOf("call_records")).toBe(0);
+      expect((await new Repo(env.DB).getIncident(incidentId))?.state).toBe(
+        "calling",
+      );
+    });
+
+    /**
+     * A call placed before the attempt was being sent reports nothing. Keeping it is deliberate:
+     * losing a real authorization is worse than judging one late call, and it is bounded to this
+     * same window.
+     */
+    it("is acted on when it reports no attempt at all", async () => {
+      const { incidentId, snapshot } = await callWaitingOnADecision();
+      await theIdHasNotComeBackYet(incidentId);
+      const withoutAttempt = {
+        ...snapshot,
+        metadata: { incident_id: incidentId, service: "checkout" },
+      } as VerifiedCall;
+
+      await orchestrator().onCallTerminal(withoutAttempt);
+
+      expect(await countOf("call_records")).toBe(1);
+    });
+  });
 });
