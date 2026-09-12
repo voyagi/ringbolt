@@ -66,6 +66,16 @@ setting and no delete on any path, which is not read off their documentation: it
 generated schema in their own SDK says. So Ringbolt keeps its own copy on its own window and cannot
 promise anything about theirs.
 
+**A backup copy leaves it too, if the operator switches one on.**
+`.github/workflows/d1-backup.yml` exports the whole database on a daily schedule and keeps it as a
+build artifact, so a copy survives losing the Cloudflare account. It is off unless
+`D1_BACKUP_ENABLED` is set. When it is on, the dump is encrypted on the runner to an OpenPGP public
+key before it becomes an artifact and the private half is never on GitHub, so the copy is ciphertext
+to everybody who can reach it, and the artifact is deleted after thirty days. Those thirty days are
+the caveat on the windows above and on erasure below: a transcript or a number can sit in an
+encrypted backup for up to a month after the sweep or an erasure request took it out of the
+database.
+
 Nothing else leaves the deployment. There is no analytics, no error reporting service, no font CDN,
 and no third party in the browser: the dashboard is served from the same Worker and the typefaces are
 files in the bundle.

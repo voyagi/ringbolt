@@ -9,10 +9,26 @@
 # and with it on a missing credential FAILS the run rather than passing an empty backup, because a
 # backup that quietly does nothing is worse than one that is admittedly absent.
 #
+# The dump is a copy of production: every responder's name and number, every transcript. It is
+# encrypted on the runner before it becomes an artifact, to an OpenPGP key whose private half never
+# comes near GitHub, because an artifact is readable by everybody who can read the repository and on
+# a public one that is every signed-in GitHub user.
+#
 # To turn it on:
 #   1. Create a Cloudflare API token with D1:read on the account holding the database.
 #   2. gh secret set CLOUDFLARE_API_TOKEN
-#   3. gh variable set D1_BACKUP_ENABLED --body true
+#   3. Make the backup key somewhere that is NOT GitHub, and leave the private half there:
+#        gpg --quick-generate-key ringbolt-backup default default never
+#        gpg --armor --export ringbolt-backup > ringbolt-backup.pub
+#   4. gh variable set D1_BACKUP_PUBLIC_KEY < ringbolt-backup.pub
+#   5. gh variable set D1_BACKUP_ENABLED --body true
+#
+# D1_BACKUP_PUBLIC_KEY is a repository VARIABLE rather than a secret on purpose: it is the public
+# half, it decrypts nothing, and leaving it readable is what lets somebody check which key the
+# backups are going to. Reading one back needs the private half:
+#   gpg --output ringbolt-2026-01-31.sql --decrypt ringbolt-2026-01-31.sql.gpg
+# Lose that half and every backup taken with it is unreadable, so it belongs wherever the rest of
+# this deployment's credentials live.
 name: d1 backup
 on:
   schedule:
@@ -51,6 +67,16 @@ jobs:
             echo "D1_BACKUP_ENABLED is true but CLOUDFLARE_API_TOKEN is not set, so no backup was taken."
             exit 1
           fi
+      # Checked before the export rather than after it: if the dump cannot be encrypted there is no
+      # reason to pull a copy of production onto a runner at all.
+      - name: check the backup key exists
+        env:
+          D1_BACKUP_PUBLIC_KEY: ${{ vars.D1_BACKUP_PUBLIC_KEY }}
+        run: |
+          if [ -z "$D1_BACKUP_PUBLIC_KEY" ]; then
+            echo "D1_BACKUP_ENABLED is true but D1_BACKUP_PUBLIC_KEY is not set, so the dump could not be encrypted and no backup was taken."
+            exit 1
+          fi
       - name: export the database
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -66,9 +92,31 @@ jobs:
             echo "that is too small to be this database. Failing rather than storing it."
             exit 1
           fi
+      # The plaintext stops here. gpg is on the runner image, the runner holds only the public half
+      # of the key, and the dump is deleted once the ciphertext exists, so nothing that can be read
+      # survives this step. Anything that goes wrong fails the job: a backup that is admittedly
+      # absent is better than one that hands production to anybody who can download an artifact.
+      - name: encrypt the dump
+        env:
+          D1_BACKUP_PUBLIC_KEY: ${{ vars.D1_BACKUP_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          file="ringbolt-$(date -u +%Y-%m-%d).sql"
+          key="$(mktemp)"
+          printf '%s\n' "$D1_BACKUP_PUBLIC_KEY" > "$key"
+          # In the log, so the day the key changes it is visible in the run that used it.
+          gpg --batch --show-keys "$key"
+          # --trust-model always: the key arrived in the repository variable on purpose, and a
+          # runner has no web of trust to weigh it against.
+          gpg --batch --yes --trust-model always --recipient-file "$key" --output "$file.gpg" --encrypt "$file"
+          test -s "$file.gpg"
+          rm -f "$key" "$file"
+          echo "$file.gpg is $(stat -c%s "$file.gpg") bytes of ciphertext"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ringbolt-d1-backup
-          path: ringbolt-*.sql
+          # Ciphertext only: this pattern cannot match a .sql, so a plaintext dump left behind by
+          # some later change still would not be uploaded.
+          path: ringbolt-*.sql.gpg
           retention-days: 30
           if-no-files-found: error
