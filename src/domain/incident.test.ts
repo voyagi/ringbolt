@@ -190,4 +190,40 @@ describe("alertPayload", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  const linkUrl = (url: string) =>
+    alertPayload.safeParse({
+      service: "checkout",
+      title: "down",
+      links: [{ label: "dashboard", url }],
+    }).success;
+
+  // These land in an `href` on the deck and the incident screen. React declines to run a
+  // `javascript:` href by itself, but it does not decline `data:`, so the scheme has to be
+  // refused here. Every one of these passes a bare `z.url()`.
+  it.each([
+    "javascript:alert(1)",
+    "JavaScript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "ms-msdt:/id",
+    "ftp://example.com/x",
+  ])("refuses a link whose scheme is not http or https: %s", (url) => {
+    expect(linkUrl(url)).toBe(false);
+  });
+
+  // The hostname is deliberately unconstrained. A monitor links to whatever it can reach, and
+  // an internal host has no public domain name. `z.httpUrl()` refuses all three of these,
+  // which is why the scheme is pinned on its own rather than by swapping the whole check.
+  it.each([
+    "https://grafana.example.com/d/abc",
+    "http://grafana/d/abc",
+    "http://10.0.0.5:3000/dashboard",
+    "http://localhost:3000/x",
+  ])("keeps accepting a monitor's real link: %s", (url) => {
+    expect(linkUrl(url)).toBe(true);
+  });
+
+  it("refuses a link url longer than the cap", () => {
+    expect(linkUrl(`https://example.com/${"a".repeat(2100)}`)).toBe(false);
+  });
 });
