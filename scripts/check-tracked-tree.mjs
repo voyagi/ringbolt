@@ -41,6 +41,7 @@ const ALLOWED_ROOT_FILES = new Set([
   '.dependency-cruiser.cjs',
   '.env.example',
   '.gitignore',
+  '.gitleaksignore',
   '.jscpd.json',
   '.size-limit.json',
   'COVERAGE.md',
