@@ -1,0 +1,18 @@
+# Fingerprints gitleaks should not report, one per line, as commit:path:rule:line.
+# Nothing here is a credential. A fingerprint names a place in the history, never a value.
+#
+# scripts/vendor/check-client-secrets.mjs is this repo's own client-bundle secret gate, and the
+# line below sits inside its runSelftest(). That function builds secret-SHAPED fixtures so the
+# deny controls can be proven to fire on a real pattern rather than on an empty bundle, and it
+# assembles every value from fragments precisely so no contiguous secret literal appears in the
+# source. gitleaks reads the file after its own parse and sees the reassembled shape, so it
+# reports a generic-api-key that never existed.
+#
+# The fixture values are deliberately fake: one is the example access-key id printed throughout
+# AWS's own documentation, and the rest are plain counting sequences. This comment does not
+# spell any of them out, for the same reason the fixtures are fragmented, and because the
+# pre-commit scanner reads this file too.
+#
+# Silencing this one fingerprint leaves every other rule and every other commit armed, which is
+# the reason to do it here rather than by waving the whole scan through at flip time.
+ddf64b4efa86cadbe839c2a278af1bdd5dd510ab:scripts/vendor/check-client-secrets.mjs:generic-api-key:609
