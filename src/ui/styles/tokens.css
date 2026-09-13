@@ -1,5 +1,5 @@
-/* The instrument palette from design/ART-DIRECTION.md. Five semantic colours and a neutral, each
-   meaning one state of the world and never used as decoration.
+/* The instrument palette. Five semantic colours and a neutral, each meaning one state of the
+   world and never used as decoration.
 
    Every surface names its own text colour. Reusing a surface colour for text on a different surface
    is what made the first direction unreadable in one theme, and reading the CSS did not catch it:

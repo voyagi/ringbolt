@@ -85,7 +85,7 @@ function trackedFiles(root) {
  * The PACKAGE directory of the resolved compiler, the one holding typescript's package.json,
  * because that is what the override branch loads from and what the selftest hands back in as the
  * override. The first version returned the directory of the resolved entry file instead, which is
- * `lib/`: the Workshop proved the selftest through TSCONFIG_COVERAGE_TS, where `from` is the
+ * `lib/`: the harness that first proved the selftest set TSCONFIG_COVERAGE_TS, where `from` is the
  * override itself, and the first product repo with its own compiler (ringbolt, 2026-09-06) had 16
  * of 28 controls come back UNKNOWN with "Cannot find module './'". Walks up from the entry file to
  * the nearest package.json that names typescript, so a nested `lib/` layout and a flat one both

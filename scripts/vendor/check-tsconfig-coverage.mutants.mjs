@@ -17,7 +17,7 @@
 // CONCURRENTLY, and `--only <substring>` re-proves a single rule after editing it.
 //
 // TSCONFIG_COVERAGE_TS is inherited by every selftest run. Set it when the repo running this harness
-// has no typescript of its own (the Workshop itself, for instance); a product repo never needs it.
+// has no typescript of its own; a product repo never needs it.
 //
 // Usage:  node scripts/vendor/check-tsconfig-coverage.mutants.mjs [--only <substring>] [--jobs <n>]
 // Exit codes: 0 all mutations caught, 1 an escape or an unproven control, 2 the baseline is not green.

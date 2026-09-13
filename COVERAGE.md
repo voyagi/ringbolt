@@ -1,13 +1,13 @@
 # What the tests actually cover
 
-Line coverage measured 2026-08-28 on `main`; the suite and the mutation score re-measured
-2026-09-08. Every number here is the output of the command beside it, run on the day given.
-Nothing is estimated, and a number nobody can reproduce is not in this file.
+Line coverage and the suite re-measured 2026-09-13; the mutation score last measured 2026-09-08.
+Every number here is the output of the command beside it, run on the day given. Nothing is
+estimated, and a number nobody can reproduce is not in this file.
 
 ## The suite
 
-`npm test` runs 455 tests across 31 files inside a real Workers isolate against a real D1, in about
-21 seconds. Nothing in it can reach a telephone or spend a cent: `vitest.config.ts` pins the mode
+`npm test` runs 555 tests across 33 files inside a real Workers isolate against a real D1, in about
+27 seconds. Nothing in it can reach a telephone or spend a cent: `vitest.config.ts` pins the mode
 to the local stand-in, the API key to a string that cannot authenticate, the number to an
 unassigned country code, the spending cap to nothing, and the only host a runbook action may call
 to a name that does not resolve.
@@ -19,15 +19,15 @@ V8 coverage:
 
 |            |        |
 | ---------- | ------ |
-| Statements | 73.14% |
-| Branches   | 62.46% |
-| Functions  | 64.53% |
-| Lines      | 74.52% |
+| Statements | 74.61% |
+| Branches   | 64.78% |
+| Functions  | 65.71% |
+| Lines      | 75.90% |
 
 **That is a fall from 91.31% statements, and the whole of it is the dashboard.** The server halves
-are where they were or better: `src/db` 99%, `src/domain` 94%, `src/actions` 93%, `src/demo` 95%,
-`src/calle` 89%, `src/worker` 91%. The dashboard's screens are 2%, and the number is worth reading
-in that shape rather than as one figure.
+are where they were or better: `src/db` 98.7%, `src/demo` 95.1%, `src/domain` 94.5%, `src/actions`
+92.6%, `src/calle` 92.5%, `src/worker` 91.0%. The dashboard's screens are 1.9%, and the number is
+worth reading in that shape rather than as one figure.
 
 They are not untested. They are tested by something line coverage cannot see: `npm run a11y:live`
 builds the bundle, drives a real browser over every screen in both themes at two widths, and asserts
@@ -44,7 +44,7 @@ Where the server gaps are, and why they are where they are:
 
 - `src/actions/service-state.ts` at 83% statements. Its two operations run in the loop tests, and
   what is left uncovered is the pair of branches for a rollback with nowhere to go.
-- `src/calle/fake.ts` at 82%. The stand-in's own D1 store is exercised; the branch that is not is
+- `src/calle/fake.ts` at 83%. The stand-in's own D1 store is exercised; the branch that is not is
   its in-memory store, which only a test would use.
 - `src/worker/wiring.ts`. The live half is built and exercised through `test/live-loop.ts` with the
   transport replaced; what is uncovered is the branch that installs the platform's real fetch, which
@@ -143,9 +143,12 @@ lean on has its own boundary tests in `src/domain/view.test.ts`.
 - An account system. Everything administrative is behind one shared token, and that is a decision
   with its reasons written in `docs/adr/0002-tenancy.md` rather than a gap waiting for tests: the
   unit of tenancy is the deployment, so there are no accounts to cover.
-- A person clicking the demo against a real deployed Worker. Every control it offers is exercised
-  against the same fixtures the accessibility gate audits, and the loop behind those controls runs
-  in the suite, but the end-to-end click-through is a test that needs a deployment, and none has
-  happened yet.
-- A real telephone. No call this product has placed has yet been a two way conversation, and
+- An automated end-to-end run against a deployed Worker. The click-through itself has now been done
+  by hand, on 2026-09-10, on the deployed demo: a bad release went out, an incident opened, a call
+  was placed, the authorization was read off the transcript and the rollback ran, leaving the
+  service serving the previous release. What does not exist is a test that repeats that against a
+  deployment on every change, because it needs a deployment to run against. Every control is
+  exercised against the same fixtures the accessibility gate audits, and the loop behind those
+  controls runs in the suite.
+- A real telephone. No call this product has placed has yet been a two-way conversation, and
   `docs/two-way-audio.md` is the whole of what is known about that.

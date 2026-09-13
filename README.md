@@ -5,6 +5,13 @@ them, and then carries out the fix they authorize out loud.
 
 A ringbolt is the iron ring bolted into a quay that a ship ties to in a storm.
 
+**See it run: [ringbolt.taranity.com](https://ringbolt.taranity.com)**, a public demo with no
+install and no account. Press the control on `/demo` and a release breaks a service, an alert
+arrives, policy decides it is worth waking somebody, a call goes out to whoever is on the rota, the
+spoken authorization is verified against the transcript, and the release is rolled back. That
+deployment answers calls with the local stand-in rather than dialling, so nothing on it can make a
+telephone ring.
+
 ## Why this exists
 
 Every on-call tool can already phone you. None of them can have a conversation.
@@ -49,8 +56,8 @@ that set it, and it wakes an incident by calling the identical code the alarm wo
 Nothing an incident can do leaves it stuck, because an incident that is stuck is an alert that has
 silently stopped ringing.
 
-Every step of that list runs. What is still ahead of the code is the screens rather than the
-mechanism, and the Status section below says exactly where.
+Every step of that list runs, and the screens behind it are built and audited. What is not finished
+is named in the Status section at the end rather than left for you to find out.
 
 ## One broken thing is one phone call
 
@@ -196,7 +203,8 @@ fall back to the deployed configuration and refuse the requests below. Open it w
 point Ringbolt at a real telephone; `.env.example` explains every value.
 
 Use `npm run dev:scheduled` instead if you want to trigger the reconciliation sweep by hand at
-`/__scheduled`, which is how you watch a lost webhook get recovered without waiting for the cron.
+`/cdn-cgi/local/scheduled`, which is how you watch a lost webhook get recovered without waiting for
+the cron.
 
 That starts against a local stand-in for CALL-E, so nothing dials a telephone. Fire an alert at
 it:
@@ -452,8 +460,11 @@ A service with no rotation of its own uses the shared one, named `*`. With no ro
 rota to be built before it can do anything.
 
 Those endpoints decide whose telephone rings, so outside development they refuse to serve until
-`ADMIN_TOKEN` is set, and then require it as a bearer token. That is a floor rather than the
-finished answer: real authentication is still ahead, and the Status section says so.
+`ADMIN_TOKEN` is set, and then require it as a bearer token. One shared token rather than accounts
+is a decision with its reasons and its costs written out in `docs/adr/0002-tenancy.md`, not an
+unfinished account system: the unit of tenancy here is the deployment. What it costs is that a
+deployment cannot tell two of its own operators apart, and revoking one person means rotating the
+token.
 
 ## The local stand-in
 
@@ -540,24 +551,28 @@ rule that would still report clean.
 
 ## Status
 
-The loop runs end to end against the local stand-in: an alert becomes an incident, policy decides
-whether it is worth a call, a call is placed to whoever is on the rota, the decision that comes back
-is verified and authorized, the authorized action changes a real system and is checked afterwards,
-and a call nobody answers moves to the next person on a timer. Actions are configuration, so what
-can be authorized on a call is something an operator writes down rather than something a deploy
-decides. The CALL-E adapter is built and switchable on, and it satisfies the same contract suite as
-the stand-in.
+The loop runs end to end, on this machine and on a deployed Worker: an alert becomes an incident,
+policy decides whether it is worth a call, a call is placed to whoever is on the rota, the decision
+that comes back is verified and authorized, the authorized action changes a real system and is
+checked afterwards, and a call nobody answers moves to the next person on a timer. Actions are
+configuration, so what can be authorized on a call is something an operator writes down rather than
+something a deploy decides. The CALL-E adapter is built and switchable on, and it satisfies the
+same contract suite as the stand-in.
 
 One thing has not been proven on a real telephone, and this is the place to say so rather than
-leave it to be discovered: no call this product has placed has yet been a two way conversation.
+leave it to be discovered: no call this product has placed has yet been a two-way conversation.
 Ringbolt was heard on all of them and the responder was not. The product's answer to that is to
-refuse to act on such a call, which is tested; the cause is still open, and
-`docs/two-way-audio.md` says exactly how far the evidence goes and what the next live call would
-settle.
+refuse to act on such a call, which is tested. **The cause is still unproven.** What changed on
+2026-09-10 is that it cannot be settled here for now: the telephone provider confirmed that calls
+to Dutch numbers in English are blocked for this setup, could not confirm when the route returns,
+and asked that the task not be retried, so the diagnostic call that would answer the question
+cannot be placed. Whether that block also explains the earlier calls is consistent with them and
+not proven, and `docs/two-way-audio.md` carries every attempt, the provider's own words, and
+exactly how far the evidence goes without going further.
 
-The demo runs too: a stranger can open a `DEMO_MODE` deployment, break the demo service, and watch
-the whole loop from the alert to the rollback, with no way to make a telephone ring and no write
-that reaches anything else.
+The demo runs on a deployed Worker: a stranger can open a `DEMO_MODE` deployment, break the demo
+service, and watch the whole loop from the alert to the rollback, with no way to make a telephone
+ring and no write that reaches anything else.
 
 Everything that says anything about a production estate or a person is behind `ADMIN_TOKEN`, which
 is one shared token rather than accounts. That is a decision rather than an unfinished job, and
