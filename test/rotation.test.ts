@@ -8,6 +8,7 @@ import type { WakeScheduler } from "../src/domain/orchestrator.js";
 import { type Contact, effectiveRotation } from "../src/domain/rotation.js";
 import { readConfig } from "../src/worker/env.js";
 import { buildOrchestrator, immediateScheduler } from "../src/worker/wiring.js";
+import { callIdWaitingOn } from "./support/call-id.js";
 import { resetTables } from "./support/reset.js";
 
 const TOKEN = "test-dummy-intake-token-0123456789";
@@ -255,7 +256,10 @@ describe("calling back after a snooze", () => {
     const wake = recordingWakes();
     const orchestrator = orchestratorWith(wake);
     await orchestrator.onCallTerminal(
-      snapshotFor(incidentId, { decision: "snooze", snooze_minutes: 20 }),
+      await snapshotFor(incidentId, {
+        decision: "snooze",
+        snooze_minutes: 20,
+      }),
     );
 
     const snoozed = await incidentAt(incidentId);
@@ -277,7 +281,7 @@ describe("calling back after a snooze", () => {
 
     const orchestrator = orchestratorWith(recordingWakes());
     await orchestrator.onCallTerminal(
-      snapshotFor(incidentId, { decision: "hold" }),
+      await snapshotFor(incidentId, { decision: "hold" }),
     );
     expect((await incidentAt(incidentId)).state).toBe("held");
 
@@ -290,9 +294,12 @@ describe("calling back after a snooze", () => {
  * Branded the way verifyCall brands a checked API response: a CallSnapshot, then the cast. The
  * tests write the snapshot themselves, so nothing else can put the brand on it.
  */
-function snapshotFor(incidentId: string, decision: unknown): VerifiedCall {
+async function snapshotFor(
+  incidentId: string,
+  decision: unknown,
+): Promise<VerifiedCall> {
   const snapshot: CallSnapshot = {
-    id: `call_stub_${incidentId}`,
+    id: await callIdWaitingOn(env.DB, incidentId),
     status: "completed",
     taskCompleted: true,
     confidenceScore: 0.94,

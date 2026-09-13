@@ -12,6 +12,7 @@ import {
   immediateScheduler,
   unscheduledWakes,
 } from "../src/worker/wiring.js";
+import { callIdWaitingOn } from "./support/call-id.js";
 import { resetTables } from "./support/reset.js";
 
 const TOKEN = "test-dummy-intake-token-0123456789";
@@ -70,7 +71,9 @@ async function resolve(incidentId: string): Promise<void> {
   // Branded the way verifyCall brands a checked API response: a CallSnapshot, then the cast. The
   // test writes the snapshot itself, so nothing else can put the brand on it.
   const snapshot: CallSnapshot = {
-    id: `call_stub_${incidentId}`,
+    // The call the incident is actually waiting on, not an invented id: `beginDeciding` compares
+    // the two, so a made-up one is a delivery for a call this incident never placed.
+    id: await callIdWaitingOn(env.DB, incidentId),
     status: "completed",
     taskCompleted: true,
     confidenceScore: 0.95,

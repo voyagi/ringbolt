@@ -351,6 +351,17 @@ app.use("/api/config/*", adminOnly);
 // behind a production change. Neither belongs on the open read API.
 app.use("/api/audit/*", adminOnly);
 
+// The call ledger's totals are the same block the board serves, and it was left open when the board
+// was closed. On a live deployment the count of real calls goes up every time Ringbolt telephones
+// somebody, so an anonymous caller polling it watches an operator's estate have an incident, and
+// reads how close the spending ceiling is to refusing every further call. The board and this route
+// publish the same figures, so they are behind the same token.
+//
+// The wildcard covers the bare `/api/budget`, which is the whole route today. That is a property of
+// the router rather than something obvious from reading it, so `test/orchestrator.test.ts` asserts
+// the refusal on the bare path rather than assuming it.
+app.use("/api/budget/*", adminOnly);
+
 // These two were open until 2026-08-25, from the walking skeleton, when the whole product was a
 // curl and a page. What they publish is what is broken in somebody's estate right now, which
 // service, how bad, and how far Ringbolt has got with it, and that is not a public fact about
@@ -369,13 +380,21 @@ app.get("/api/incidents", async (c) => {
   return c.json({ incidents: incidents.map(forPublicList) });
 });
 
+/**
+ * The events go through `toEventView` for the same reason the incident goes through
+ * `withoutCallId`, and both halves are needed: a `call.placed` event's stored `data` carries the
+ * call id, so returning the rows raw handed back the one value the line above had just taken out.
+ * The audit route was already filtering them; this one was not, and the test beside it only ever
+ * checked the incident object.
+ */
 app.get("/api/incidents/:id", async (c) => {
   const repo = new Repo(c.env.DB);
   const incident = await repo.getIncident(c.req.param("id"));
   if (incident === null) return c.json({ error: "no such incident" }, 404);
+  const events = await repo.listEvents(incident.id);
   return c.json({
     incident: withoutCallId(incident),
-    events: await repo.listEvents(incident.id),
+    events: events.map(toEventView),
   });
 });
 
@@ -858,6 +877,57 @@ function adminMode(config: RingboltConfig): AdminMode {
 }
 
 /**
+ * Null when a caller in `open` mode may go on, and the refusal when the request came from another
+ * website.
+ *
+ * `open` mode admits a request on the strength of nothing at all, which is what makes a laptop's
+ * curls work. The cost is that any page the developer happens to have open can drive these routes
+ * too: the browser sends a form POST cross-site without asking anybody, and withholds only the
+ * reply. That is enough to erase a contact or place a call, and neither needs to be read back.
+ *
+ * Being unable to read the reply is not a defence, and neither is the browser's preflight: a form
+ * POST is exempt from it, and four of the routes behind this guard read no body at all.
+ *
+ * So the request has to say where it came from. Both headers are consulted because either alone has
+ * a hole: `Sec-Fetch-Site` is the direct answer but an older browser omits it, and `Origin` is
+ * absent on some same-origin requests. Absent is treated as allowed on purpose, because curl and
+ * the README's own commands send neither and serving them is the whole point of `open` mode. So
+ * this refuses what can be shown to be cross-site rather than admitting only what can be shown
+ * not to be. That is the weaker of the two guarantees, and the only one available without
+ * breaking a terminal.
+ *
+ * The token path needs none of this. Setting `Authorization` cross-site is not a simple request, so
+ * it forces a preflight, and this Worker answers no preflight permissively.
+ */
+function crossSiteRefusal(c: Context<{ Bindings: Bindings }>): Response | null {
+  const site = c.req.header("sec-fetch-site");
+  if (site !== undefined && site !== "same-origin" && site !== "none") {
+    return crossSiteRefused(c, `Sec-Fetch-Site was ${site}`);
+  }
+
+  const origin = c.req.header("origin");
+  if (origin !== undefined && origin !== new URL(c.req.url).origin) {
+    return crossSiteRefused(c, `Origin was ${origin}`);
+  }
+
+  return null;
+}
+
+function crossSiteRefused(
+  c: Context<{ Bindings: Bindings }>,
+  because: string,
+): Response {
+  return c.json(
+    {
+      error:
+        "this request came from another site, and these routes are only open to this one. Set ADMIN_TOKEN to use them from anywhere else.",
+      because,
+    },
+    403,
+  );
+}
+
+/**
  * Null when the caller may go on, and the refusal to send back when they may not.
  *
  * A correct token costs nothing beyond the comparison: the rate limit is counted only when the
@@ -877,7 +947,7 @@ async function adminRefusal(
 
   const expected = config.ADMIN_TOKEN;
   if (expected === undefined) {
-    if (adminMode(config) === "open") return null;
+    if (adminMode(config) === "open") return crossSiteRefusal(c);
     return c.json(
       {
         error:

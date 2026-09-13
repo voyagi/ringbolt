@@ -240,12 +240,25 @@ describe("the whole loop", () => {
     expect(list.incidents).toHaveLength(1);
     expect(list.incidents[0]).not.toHaveProperty("callId");
 
-    const detail = (await (
-      await SELF.fetch(
-        `https://ringbolt.test/api/incidents/${String(list.incidents[0]?.["id"])}`,
-      )
-    ).json()) as { incident: Record<string, unknown> };
+    const response = await SELF.fetch(
+      `https://ringbolt.test/api/incidents/${String(list.incidents[0]?.["id"])}`,
+    );
+    const raw = await response.text();
+    const detail = JSON.parse(raw) as {
+      incident: Record<string, unknown>;
+      events: Record<string, unknown>[];
+    };
     expect(detail.incident).not.toHaveProperty("callId");
+
+    // The whole body, not just the incident object. Stripping the field from one half while the
+    // `call.placed` event's stored `data` carried it in the other is exactly what this assertion
+    // used to miss, and the id is a real value here rather than a shape, so the text is checked.
+    expect(detail.events.length).toBeGreaterThan(0);
+    for (const event of detail.events) {
+      expect(event).not.toHaveProperty("data");
+    }
+    expect(raw).not.toContain("callId");
+    expect(raw).not.toContain("call_fake_");
   });
 
   /**

@@ -49,11 +49,12 @@ a delete. It does not cover losing the account.
 
 The other leg lives off the platform, and it is the one that needs a decision.
 `.github/workflows/d1-backup.yml` runs
-`wrangler d1 export ringbolt --remote` on a schedule and keeps the dump as a build artifact, which
+`wrangler d1 export ringbolt --remote` on a schedule, encrypts the dump to the OpenPGP public key in
+the `D1_BACKUP_PUBLIC_KEY` repository variable, and keeps that ciphertext as a build artifact, which
 is a different platform from the one holding the database. It is off until the repository variable
-`D1_BACKUP_ENABLED` is set to `true` and a `CLOUDFLARE_API_TOKEN` secret exists, and it fails loudly
-rather than skipping quietly if it is enabled without them. Until that switch is on, the only
-backup is Time Travel, and that is a decision rather than an oversight.
+`D1_BACKUP_ENABLED` is set to `true` and a `CLOUDFLARE_API_TOKEN` secret and that public key exist,
+and it fails loudly rather than skipping quietly if it is enabled without them. Until that switch is
+on, the only backup is Time Travel, and that is a decision rather than an oversight.
 
 Run one by hand at any time:
 
@@ -72,9 +73,11 @@ wrangler d1 time-travel restore ringbolt --bookmark=BOOKMARK_ID
 ```
 
 For a lost account, or a dump you want to load into a fresh database, the export is a plain SQL
-file and the restore is an import:
+file and the restore is an import. A dump taken by the backup workflow comes down as ciphertext, so
+it is decrypted first, on a machine holding the private half of the key it was encrypted to:
 
 ```bash
+gpg --output ringbolt-2026-08-24.sql --decrypt ringbolt-2026-08-24.sql.gpg   # workflow dumps only
 wrangler d1 execute ringbolt --remote --file ringbolt-2026-08-24.sql -y
 ```
 

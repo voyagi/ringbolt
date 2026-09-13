@@ -181,6 +181,176 @@ describe("the contract both halves of the product read", () => {
       expect(turnGranting(spoken, "")).toBeNull();
       expect(turnGranting(spoken, " -- !!")).toBeNull();
     });
+
+    const saying = (text: string) => [{ speaker: "user", text }];
+
+    /**
+     * The defect this search had until it read words. It tested characters in the joined string,
+     * so a responder refusing the action counted as saying the words that authorize it.
+     */
+    it.each([
+      "Do not roll it back.",
+      "Never roll it back.",
+      "Dont roll it back",
+      // `normalisePhrase` turns the apostrophe into a space, so each of these arrives as a stem
+      // ending in n and then a lone t. A list of negating words alone would miss every one.
+      "Don't roll it back.",
+      "Please don't roll it back.",
+      "We can't roll it back.",
+      "Don't just roll it back.",
+    ])("marks nothing when the words are said negated: %s", (text) => {
+      expect(turnGranting(saying(text), "roll it back")).toBeNull();
+    });
+
+    /**
+     * An n't contraction for every English auxiliary verb, plus the four irregular ones, in both
+     * spellings transcription produces: with the apostrophe kept, and with it dropped. Written out
+     * here rather than read from the implementation, so a form missing from both would fail rather
+     * than pass by agreeing with itself.
+     *
+     * Two earlier lists were each short: the first of the common ones missed "couldnt" and "wasnt",
+     * and the second missed "mayn't". "amn't" and "usedn't" were missing from both.
+     */
+    const contractions = [
+      "ain't",
+      "amn't",
+      "aren't",
+      "can't",
+      "couldn't",
+      "daren't",
+      "didn't",
+      "doesn't",
+      "don't",
+      "hadn't",
+      "hasn't",
+      "haven't",
+      "isn't",
+      "mayn't",
+      "mightn't",
+      "mustn't",
+      "needn't",
+      "oughtn't",
+      "shan't",
+      "shouldn't",
+      "usedn't",
+      "wasn't",
+      "weren't",
+      "won't",
+      "wouldn't",
+    ];
+    it.each(
+      contractions.flatMap((contraction) => [
+        contraction,
+        contraction.replace("'", ""),
+      ]),
+    )("marks nothing when the words follow %s", (contraction) => {
+      expect(
+        turnGranting(saying(`${contraction} roll it back`), "roll it back"),
+      ).toBeNull();
+    });
+
+    /** A word that only ends the way a contraction does is not one. */
+    it.each(["I want you to roll it back.", "It went badly, roll it back."])(
+      "still grants when a word only ends like a contraction: %s",
+      (text) => {
+        expect(turnGranting(saying(text), "roll it back")).toBe(0);
+      },
+    );
+
+    /** The characters of the phrase inside other words are not the phrase. */
+    it.each(["Unroll it backwards.", "Roll it backup."])(
+      "marks nothing when the words only appear inside other words: %s",
+      (text) => {
+        expect(turnGranting(saying(text), "roll it back")).toBeNull();
+      },
+    );
+
+    /**
+     * The last saying wins in both directions. A responder who said the words and then withdrew
+     * them finished on a refusal, so the earlier plain saying must not be reached for instead.
+     */
+    it("marks nothing when a later turn withdraws the words", () => {
+      expect(
+        turnGranting(
+          [
+            { speaker: "user", text: "Roll it back." },
+            { speaker: "user", text: "Actually, do not roll it back." },
+          ],
+          "roll it back",
+        ),
+      ).toBeNull();
+    });
+
+    it("marks nothing when the words are withdrawn inside the same turn", () => {
+      expect(
+        turnGranting(
+          saying("Roll it back, no wait, do not roll it back."),
+          "roll it back",
+        ),
+      ).toBeNull();
+    });
+
+    it("grants on a plain saying that comes after a refusal", () => {
+      expect(
+        turnGranting(
+          [
+            { speaker: "user", text: "Do not roll it back yet." },
+            { speaker: "user", text: "Okay, roll it back now." },
+          ],
+          "roll it back",
+        ),
+      ).toBe(1);
+      expect(
+        turnGranting(
+          saying("Do not roll it back yet, actually roll it back."),
+          "roll it back",
+        ),
+      ).toBe(0);
+    });
+
+    /**
+     * Left out of the negating words on purpose, because refusing these throws away a real
+     * authorization. "No" here contradicts something before it and then agrees, and "can we"
+     * asks for the action.
+     */
+    it.each(["No, roll it back.", "Can we roll it back?"])(
+      "still grants on a saying that only looks negative: %s",
+      (text) => {
+        expect(turnGranting(saying(text), "roll it back")).toBe(0);
+      },
+    );
+
+    /**
+     * The negation is read from the three words in front of the phrase, and both edges of that are
+     * pinned here so a change to them is a decision rather than an accident. A word count cannot
+     * tell which clause a negation belongs to, so there is no width that gets both of these right.
+     *
+     * Too far back to see: this is a refusal, and it is not caught. It needs the provider's
+     * extraction to have already turned a refusal into `run_action` with the exact phrase, which
+     * is the failure this check exists to notice, so it is a real gap and is named as one.
+     */
+    it("does not reach a negation more than three words before the phrase", () => {
+      expect(
+        turnGranting(
+          saying("I don't want you to roll it back."),
+          "roll it back",
+        ),
+      ).toBe(0);
+    });
+
+    /**
+     * Close enough to see, but belonging to another clause: this is an authorization, and it is
+     * refused. That is the accepted cost of the width. A refusal here escalates to the next person
+     * on the rota, where the opposite error is a production change made on somebody saying not to.
+     */
+    it("refuses a saying with an unrelated negation in the three words before it", () => {
+      expect(
+        turnGranting(
+          saying("I didn't catch that, roll it back."),
+          "roll it back",
+        ),
+      ).toBeNull();
+    });
   });
 
   /**
