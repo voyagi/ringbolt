@@ -1,13 +1,13 @@
 # What the tests actually cover
 
-Line coverage and the suite re-measured 2026-09-11; the mutation score last measured 2026-09-08.
+Line coverage and the suite re-measured 2026-09-13; the mutation score last measured 2026-09-08.
 Every number here is the output of the command beside it, run on the day given. Nothing is
 estimated, and a number nobody can reproduce is not in this file.
 
 ## The suite
 
-`npm test` runs 457 tests across 31 files inside a real Workers isolate against a real D1, in about
-20 seconds. Nothing in it can reach a telephone or spend a cent: `vitest.config.ts` pins the mode
+`npm test` runs 555 tests across 33 files inside a real Workers isolate against a real D1, in about
+27 seconds. Nothing in it can reach a telephone or spend a cent: `vitest.config.ts` pins the mode
 to the local stand-in, the API key to a string that cannot authenticate, the number to an
 unassigned country code, the spending cap to nothing, and the only host a runbook action may call
 to a name that does not resolve.
@@ -19,14 +19,14 @@ V8 coverage:
 
 |            |        |
 | ---------- | ------ |
-| Statements | 74.09% |
-| Branches   | 64.04% |
-| Functions  | 65.10% |
-| Lines      | 75.39% |
+| Statements | 74.61% |
+| Branches   | 64.78% |
+| Functions  | 65.71% |
+| Lines      | 75.90% |
 
 **That is a fall from 91.31% statements, and the whole of it is the dashboard.** The server halves
-are where they were or better: `src/db` 98.7%, `src/demo` 95.1%, `src/domain` 94.3%, `src/actions`
-92.6%, `src/calle` 92.5%, `src/worker` 90.7%. The dashboard's screens are 1.9%, and the number is
+are where they were or better: `src/db` 98.7%, `src/demo` 95.1%, `src/domain` 94.5%, `src/actions`
+92.6%, `src/calle` 92.5%, `src/worker` 91.0%. The dashboard's screens are 1.9%, and the number is
 worth reading in that shape rather than as one figure.
 
 They are not untested. They are tested by something line coverage cannot see: `npm run a11y:live`
@@ -44,7 +44,7 @@ Where the server gaps are, and why they are where they are:
 
 - `src/actions/service-state.ts` at 83% statements. Its two operations run in the loop tests, and
   what is left uncovered is the pair of branches for a rollback with nowhere to go.
-- `src/calle/fake.ts` at 82%. The stand-in's own D1 store is exercised; the branch that is not is
+- `src/calle/fake.ts` at 83%. The stand-in's own D1 store is exercised; the branch that is not is
   its in-memory store, which only a test would use.
 - `src/worker/wiring.ts`. The live half is built and exercised through `test/live-loop.ts` with the
   transport replaced; what is uncovered is the branch that installs the platform's real fetch, which
@@ -150,5 +150,5 @@ lean on has its own boundary tests in `src/domain/view.test.ts`.
   deployment on every change, because it needs a deployment to run against. Every control is
   exercised against the same fixtures the accessibility gate audits, and the loop behind those
   controls runs in the suite.
-- A real telephone. No call this product has placed has yet been a two way conversation, and
+- A real telephone. No call this product has placed has yet been a two-way conversation, and
   `docs/two-way-audio.md` is the whole of what is known about that.

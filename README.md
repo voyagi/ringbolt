@@ -560,7 +560,7 @@ something a deploy decides. The CALL-E adapter is built and switchable on, and i
 same contract suite as the stand-in.
 
 One thing has not been proven on a real telephone, and this is the place to say so rather than
-leave it to be discovered: no call this product has placed has yet been a two way conversation.
+leave it to be discovered: no call this product has placed has yet been a two-way conversation.
 Ringbolt was heard on all of them and the responder was not. The product's answer to that is to
 refuse to act on such a call, which is tested. **The cause is still unproven.** What changed on
 2026-09-10 is that it cannot be settled here for now: the telephone provider confirmed that calls
