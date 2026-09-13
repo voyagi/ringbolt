@@ -352,6 +352,52 @@ describe("authorize", () => {
     });
   });
 
+  /**
+   * The same call as the one above in every respect but one: the responder refused. The provider
+   * extracted `run_action` with the exact phrase anyway, which is precisely the extraction fault the
+   * transcript check is there to catch, and until it read words the check found "roll it back"
+   * inside "do not roll it back" and let the rollback through.
+   */
+  it("refuses a confirmed action when the responder said the words negated", () => {
+    const result = authorize({
+      ...base,
+      transcript: [
+        { speaker: "bot", text: "Say roll it back to confirm." },
+        { speaker: "user", text: "Do not roll it back." },
+      ],
+      structuredResult: {
+        decision: "run_action",
+        action_id: "rollback",
+        confirmation_phrase: "roll it back",
+      },
+    });
+    expect(result).toMatchObject({
+      authorized: false,
+      refusal: "confirmation_not_in_transcript",
+    });
+  });
+
+  /** A saying the responder then withdrew is not an authorization either. */
+  it("refuses a confirmed action the responder withdrew later in the call", () => {
+    const result = authorize({
+      ...base,
+      transcript: [
+        { speaker: "bot", text: "Say roll it back to confirm." },
+        { speaker: "user", text: "Roll it back." },
+        { speaker: "user", text: "Actually, do not roll it back." },
+      ],
+      structuredResult: {
+        decision: "run_action",
+        action_id: "rollback",
+        confirmation_phrase: "roll it back",
+      },
+    });
+    expect(result).toMatchObject({
+      authorized: false,
+      refusal: "confirmation_not_in_transcript",
+    });
+  });
+
   it("refuses an action the caller narrowed out of the offered set", () => {
     const result = authorize({
       ...base,
