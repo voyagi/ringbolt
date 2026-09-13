@@ -247,15 +247,48 @@ function wordsOf(value: string): string[] {
 }
 
 /**
+ * What every n't contraction leaves in front of its t: "couldn't" is `couldn` and then `t`.
+ *
+ * English has a closed set of these, so it is written out in full rather than guessed from a
+ * suffix. A rule like "a word ending in nt" would read "want" and "went" as refusals, and a hand
+ * picked list of the common ones is how "couldnt" and "wasnt" were missed the first time.
+ */
+const CONTRACTION_STEMS: ReadonlySet<string> = new Set([
+  "ain",
+  "aren",
+  "can",
+  "couldn",
+  "daren",
+  "didn",
+  "doesn",
+  "don",
+  "hadn",
+  "hasn",
+  "haven",
+  "isn",
+  "mightn",
+  "mustn",
+  "needn",
+  "oughtn",
+  "shan",
+  "shouldn",
+  "wasn",
+  "weren",
+  "won",
+  "wouldn",
+]);
+
+/**
  * Words that, said just before the required phrase, make it a refusal rather than a grant.
  *
  * Bare `no` and bare `can` are left out on purpose. "No, roll it back" contradicts something and
  * then authorizes, and "can we roll it back" asks for it. Refusing either would throw away a real
  * authorization, and a genuine negation of the phrase almost always carries one of these as well.
  *
- * Contractions are here only in their unpunctuated spelling, because `normalisePhrase` turns an
- * apostrophe into a space and "don't" arrives as the two words `don` and `t`. That split form is
- * caught by `isNegation`, not by this list.
+ * A contraction reaches this function in one of two spellings, and both come from
+ * `CONTRACTION_STEMS` so the two cannot drift apart. When transcription drops the apostrophe it is
+ * one word, `couldnt`, and that is listed here. When it keeps it, `normalisePhrase` turns the
+ * apostrophe into a space and it arrives as `couldn` then `t`, which `isNegation` reads as a pair.
  */
 const NEGATORS: ReadonlySet<string> = new Set([
   "not",
@@ -265,19 +298,7 @@ const NEGATORS: ReadonlySet<string> = new Set([
   "neither",
   "nor",
   "without",
-  "dont",
-  "doesnt",
-  "didnt",
-  "wont",
-  "cant",
-  "shouldnt",
-  "wouldnt",
-  "isnt",
-  "arent",
-  "aint",
-  "havent",
-  "hasnt",
-  "mustnt",
+  ...[...CONTRACTION_STEMS].map((stem) => `${stem}t`),
 ]);
 
 /**
@@ -296,9 +317,9 @@ function isNegation(words: readonly string[], index: number): boolean {
   const word = words[index];
   if (word === undefined) return false;
   if (NEGATORS.has(word)) return true;
-  // A split contraction. Every n't form leaves a stem ending in n followed by a lone t: `don t`,
-  // `can t`, `won t`, `didn t`. A lone t arises from almost nothing else once punctuation is gone.
-  return word === "t" && (words[index - 1]?.endsWith("n") ?? false);
+  // A split contraction: a lone t after one of the stems, `couldn t`, `won t`. Checked against the
+  // same set the unpunctuated spellings come from, rather than any word ending in n.
+  return word === "t" && CONTRACTION_STEMS.has(words[index - 1] ?? "");
 }
 
 function negatedBefore(words: readonly string[], start: number): boolean {

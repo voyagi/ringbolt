@@ -202,6 +202,55 @@ describe("the contract both halves of the product read", () => {
       expect(turnGranting(saying(text), "roll it back")).toBeNull();
     });
 
+    /**
+     * Every English n't contraction, in both spellings transcription produces: with the apostrophe
+     * kept, and with it dropped. Written out here rather than read from the implementation, so a
+     * stem missing from both would fail rather than pass by agreeing with itself. "Couldnt" and
+     * "wasnt" were missing the first time a list of common ones was used.
+     */
+    const contractions = [
+      "ain't",
+      "aren't",
+      "can't",
+      "couldn't",
+      "daren't",
+      "didn't",
+      "doesn't",
+      "don't",
+      "hadn't",
+      "hasn't",
+      "haven't",
+      "isn't",
+      "mightn't",
+      "mustn't",
+      "needn't",
+      "oughtn't",
+      "shan't",
+      "shouldn't",
+      "wasn't",
+      "weren't",
+      "won't",
+      "wouldn't",
+    ];
+    it.each(
+      contractions.flatMap((contraction) => [
+        contraction,
+        contraction.replace("'", ""),
+      ]),
+    )("marks nothing when the words follow %s", (contraction) => {
+      expect(
+        turnGranting(saying(`${contraction} roll it back`), "roll it back"),
+      ).toBeNull();
+    });
+
+    /** A word that only ends the way a contraction does is not one. */
+    it.each(["I want you to roll it back.", "It went badly, roll it back."])(
+      "still grants when a word only ends like a contraction: %s",
+      (text) => {
+        expect(turnGranting(saying(text), "roll it back")).toBe(0);
+      },
+    );
+
     /** The characters of the phrase inside other words are not the phrase. */
     it.each(["Unroll it backwards.", "Roll it backup."])(
       "marks nothing when the words only appear inside other words: %s",
