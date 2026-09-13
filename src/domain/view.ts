@@ -247,35 +247,53 @@ function wordsOf(value: string): string[] {
 }
 
 /**
+ * The English auxiliary verbs, the closed grammatical class n't attaches to.
+ *
+ * The stems below are derived from this list rather than written out as contractions, because a
+ * list of contractions written from memory has been short twice: the first missed "couldnt" and
+ * "wasnt", and the second, described as complete, missed "mayn't", "amn't" and "usedn't". A
+ * missing verb is a gap in a stated rule that can be checked against a grammar, where a missing
+ * contraction was a gap nobody could see.
+ */
+const AUXILIARIES = [
+  "am",
+  "are",
+  "could",
+  "dare",
+  "did",
+  "do",
+  "does",
+  "had",
+  "has",
+  "have",
+  "is",
+  "may",
+  "might",
+  "must",
+  "need",
+  "ought",
+  "should",
+  "used",
+  "was",
+  "were",
+  "would",
+] as const;
+
+/**
+ * The four contractions that change the verb's shape rather than adding n't to it: "ain't" has no
+ * verb of its own, "can't" drops an n, and "won't" and "shan't" come from will and shall.
+ */
+const IRREGULAR_STEMS = ["ain", "can", "shan", "won"] as const;
+
+/**
  * What every n't contraction leaves in front of its t: "couldn't" is `couldn` and then `t`.
  *
- * English has a closed set of these, so it is written out in full rather than guessed from a
- * suffix. A rule like "a word ending in nt" would read "want" and "went" as refusals, and a hand
- * picked list of the common ones is how "couldnt" and "wasnt" were missed the first time.
+ * Built from the verbs rather than guessed from a suffix. A rule like "a word ending in nt" would
+ * read "want" and "went" as refusals.
  */
 const CONTRACTION_STEMS: ReadonlySet<string> = new Set([
-  "ain",
-  "aren",
-  "can",
-  "couldn",
-  "daren",
-  "didn",
-  "doesn",
-  "don",
-  "hadn",
-  "hasn",
-  "haven",
-  "isn",
-  "mightn",
-  "mustn",
-  "needn",
-  "oughtn",
-  "shan",
-  "shouldn",
-  "wasn",
-  "weren",
-  "won",
-  "wouldn",
+  ...AUXILIARIES.map((verb) => `${verb}n`),
+  ...IRREGULAR_STEMS,
 ]);
 
 /**

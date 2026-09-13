@@ -203,13 +203,17 @@ describe("the contract both halves of the product read", () => {
     });
 
     /**
-     * Every English n't contraction, in both spellings transcription produces: with the apostrophe
-     * kept, and with it dropped. Written out here rather than read from the implementation, so a
-     * stem missing from both would fail rather than pass by agreeing with itself. "Couldnt" and
-     * "wasnt" were missing the first time a list of common ones was used.
+     * An n't contraction for every English auxiliary verb, plus the four irregular ones, in both
+     * spellings transcription produces: with the apostrophe kept, and with it dropped. Written out
+     * here rather than read from the implementation, so a form missing from both would fail rather
+     * than pass by agreeing with itself.
+     *
+     * Two earlier lists were each short: the first of the common ones missed "couldnt" and "wasnt",
+     * and the second missed "mayn't". "amn't" and "usedn't" were missing from both.
      */
     const contractions = [
       "ain't",
+      "amn't",
       "aren't",
       "can't",
       "couldn't",
@@ -221,12 +225,14 @@ describe("the contract both halves of the product read", () => {
       "hasn't",
       "haven't",
       "isn't",
+      "mayn't",
       "mightn't",
       "mustn't",
       "needn't",
       "oughtn't",
       "shan't",
       "shouldn't",
+      "usedn't",
       "wasn't",
       "weren't",
       "won't",
