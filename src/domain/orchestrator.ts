@@ -182,9 +182,11 @@ export class Orchestrator {
     const incidentId = incidentIdOf(snapshot);
     if (incidentId === null) return;
 
-    // As in open(), no await before the section is entered.
+    // As in open(), no await before the section is entered. The call's own id goes in with the
+    // incident's: this snapshot is only allowed to decide the call the incident is actually waiting
+    // on, and a superseded one has to leave the current call's move where it found it.
     const incident = await this.deps.exclusive(() =>
-      this.beginDeciding(incidentId),
+      this.beginDeciding(incidentId, snapshot.id, attemptOf(snapshot)),
     );
     if (incident === null) return;
 
@@ -652,7 +654,15 @@ export class Orchestrator {
       phone: contact.phone,
       task: buildTask(incident, offered, this.deps.now()),
       resultSchema: decisionResultSchemaFor(offered),
-      metadata: { incident_id: incident.id, service: incident.service },
+      // The attempt goes with the call because the id cannot be the only identity: a create that
+      // times out does not cancel a call CALL-E already accepted, so the webhook for this call can
+      // arrive before its id does. This is knowable before the request goes out, and it is what
+      // `beginDeciding` matches on across that window.
+      metadata: {
+        incident_id: incident.id,
+        service: incident.service,
+        attempt: String(attempt),
+      },
       webhookUrl: `${this.deps.publicBaseUrl}/webhooks/calle`,
       // One key per attempt, and the same key on every send of that attempt. The next person in the
       // rotation is a different attempt, so their call is not folded into the last one.
@@ -990,9 +1000,48 @@ export class Orchestrator {
     );
   }
 
-  private async beginDeciding(incidentId: string): Promise<Incident | null> {
+  /**
+   * Claims the incident's one move out of `calling` for a named call, or null when this call is not
+   * the one the incident is waiting on.
+   *
+   * The call id is checked as well as the state, because the state alone does not say WHICH call.
+   * An incident goes back into `calling` every time it escalates, and nothing cancels the previous
+   * call at the provider, so a conversation that outran `GIVE_UP_AFTER_MS` can still deliver its
+   * outcome after the next person has been rung. The state test passes for that delivery. Without
+   * the id test three things then go wrong at once: the earlier responder's decision runs an action
+   * against an offer the current call put up, the audit record names the current contact as the
+   * person who authorized it, and the responder who is on the telephone at that moment has their
+   * own answer dropped, because this move has already been spent.
+   *
+   * The id alone is not enough to decide this, and an earlier version of this guard that used only
+   * the id threw away decisions it should have kept. The id is learned from CALL-E's answer to the
+   * create, and a create that times out does not cancel a call CALL-E already accepted, so there is
+   * a window where the responder is on the telephone about THIS incident and the id of the call
+   * they are on has never reached us. In that window `incident.callId` is still null. Refusing
+   * every delivery that arrives with no id recorded discards exactly the decision the product
+   * exists to capture, and if neither create attempt settles, `callCouldNotBePlaced` closes the
+   * incident and it is gone for good.
+   *
+   * So the attempt number is the identity across that window: `placeCall` writes `callAttempts` in
+   * the same atomic update that clears `callId`, before anything goes to the provider, and `dial`
+   * sends it as metadata the snapshot carries back. A superseded call reports an earlier attempt
+   * and is still refused; the call being placed right now reports the current one and is honoured.
+   *
+   * A call placed by a version that did not send the attempt reports null. That is treated as a
+   * match only while no id is recorded, which is the same window, and is the reading that keeps a
+   * decision rather than dropping one.
+   *
+   * Both reads happen inside the caller's exclusive section, so the row this compares against is
+   * the row it then writes.
+   */
+  private async beginDeciding(
+    incidentId: string,
+    callId: string,
+    attempt: number | null,
+  ): Promise<Incident | null> {
     const incident = await this.deps.repo.getIncident(incidentId);
     if (incident === null || incident.state !== "calling") return null;
+    if (!thisIsTheCallInHand(incident, callId, attempt)) return null;
 
     const at = this.deps.now().toISOString();
     const state = transition(incident.state, "deciding");
@@ -1174,6 +1223,47 @@ export class Orchestrator {
 export function incidentIdOf(snapshot: VerifiedCall): string | null {
   const value = snapshot.metadata["incident_id"];
   return typeof value === "string" ? value : null;
+}
+
+/**
+ * Which attempt on its incident this call was, or null when the call was placed before the attempt
+ * was being sent.
+ *
+ * This exists because the call id cannot be the only identity. It is learned from CALL-E's answer
+ * to the create, and a create that times out does not cancel a call CALL-E already accepted, so
+ * there is a window where somebody is being telephoned about this incident and the id of the call
+ * doing it has never reached us. The attempt number is known before the request goes out, so it
+ * identifies the call across that window where the id cannot.
+ *
+ * Null for any call placed by an older version, which the caller has to treat as unknown rather
+ * than as a mismatch.
+ */
+export function attemptOf(snapshot: VerifiedCall): number | null {
+  const value = snapshot.metadata["attempt"];
+  if (typeof value !== "string") return null;
+  const attempt = Number(value);
+  return Number.isInteger(attempt) && attempt > 0 ? attempt : null;
+}
+
+/**
+ * Whether a terminal snapshot is the call this incident is waiting on.
+ *
+ * Written as one function taking the whole incident so the two readings cannot drift apart, and so
+ * the window it exists for is stated once rather than implied at each comparison.
+ */
+function thisIsTheCallInHand(
+  incident: Incident,
+  callId: string,
+  attempt: number | null,
+): boolean {
+  // The ordinary case: the create came back, the id is on the incident, and it either is or is not
+  // this call. Nothing else needs consulting.
+  if (incident.callId !== null) return incident.callId === callId;
+
+  // No id recorded, so this is the placement window. The attempt decides. A call from before the
+  // attempt was sent reports null, and is kept rather than dropped: losing a real authorization is
+  // the worse of the two errors, and it is bounded to this window either way.
+  return attempt === null || attempt === incident.callAttempts;
 }
 
 /**

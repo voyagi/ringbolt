@@ -36,8 +36,23 @@ export const alertPayload = z.object({
   fingerprint: z.string().min(1).max(200).optional(),
   startedAt: z.iso.datetime().optional(),
   source: z.string().max(120).optional(),
+  /**
+   * A monitor's own deep links, rendered as anchors on the deck and the incident screen.
+   *
+   * The scheme is pinned to http and https because a bare `z.url()` accepts anything the URL
+   * parser accepts, `javascript:` and `data:` included, and these land in an `href` an operator
+   * clicks. React refuses a `javascript:` href of its own accord, but it does not refuse
+   * `data:`, so the allowlist has to be here rather than left to the renderer. The hostname is
+   * deliberately NOT constrained: a monitor legitimately links to an internal host or an
+   * address with no public domain name, which `z.httpUrl()` would reject.
+   */
   links: z
-    .array(z.object({ label: z.string().max(80), url: z.url() }))
+    .array(
+      z.object({
+        label: z.string().max(80),
+        url: z.url({ protocol: /^https?$/ }).max(2000),
+      }),
+    )
     .max(6)
     .optional(),
 });
