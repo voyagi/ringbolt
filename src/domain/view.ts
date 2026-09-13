@@ -240,15 +240,166 @@ export function phrasesMatch(spoken: string, required: string): boolean {
   return normalisePhrase(spoken) === normalisePhrase(required);
 }
 
+/** The words of a value, in order, after the reduction `normalisePhrase` does. */
+function wordsOf(value: string): string[] {
+  const normalised = normalisePhrase(value);
+  return normalised === "" ? [] : normalised.split(" ");
+}
+
+/**
+ * The English auxiliary verbs, the closed grammatical class n't attaches to.
+ *
+ * The stems below are derived from this list rather than written out as contractions, because a
+ * list of contractions written from memory has been short twice: the first missed "couldnt" and
+ * "wasnt", and the second, described as complete, missed "mayn't", "amn't" and "usedn't". A
+ * missing verb is a gap in a stated rule that can be checked against a grammar, where a missing
+ * contraction was a gap nobody could see.
+ */
+const AUXILIARIES = [
+  "am",
+  "are",
+  "could",
+  "dare",
+  "did",
+  "do",
+  "does",
+  "had",
+  "has",
+  "have",
+  "is",
+  "may",
+  "might",
+  "must",
+  "need",
+  "ought",
+  "should",
+  "used",
+  "was",
+  "were",
+  "would",
+] as const;
+
+/**
+ * The four contractions that change the verb's shape rather than adding n't to it: "ain't" has no
+ * verb of its own, "can't" drops an n, and "won't" and "shan't" come from will and shall.
+ */
+const IRREGULAR_STEMS = ["ain", "can", "shan", "won"] as const;
+
+/**
+ * What every n't contraction leaves in front of its t: "couldn't" is `couldn` and then `t`.
+ *
+ * Built from the verbs rather than guessed from a suffix. A rule like "a word ending in nt" would
+ * read "want" and "went" as refusals.
+ */
+const CONTRACTION_STEMS: ReadonlySet<string> = new Set([
+  ...AUXILIARIES.map((verb) => `${verb}n`),
+  ...IRREGULAR_STEMS,
+]);
+
+/**
+ * Words that, said just before the required phrase, make it a refusal rather than a grant.
+ *
+ * Bare `no` and bare `can` are left out on purpose. "No, roll it back" contradicts something and
+ * then authorizes, and "can we roll it back" asks for it. Refusing either would throw away a real
+ * authorization, and a genuine negation of the phrase almost always carries one of these as well.
+ *
+ * A contraction reaches this function in one of two spellings, and both come from
+ * `CONTRACTION_STEMS` so the two cannot drift apart. When transcription drops the apostrophe it is
+ * one word, `couldnt`, and that is listed here. When it keeps it, `normalisePhrase` turns the
+ * apostrophe into a space and it arrives as `couldn` then `t`, which `isNegation` reads as a pair.
+ */
+const NEGATORS: ReadonlySet<string> = new Set([
+  "not",
+  "never",
+  "cannot",
+  "nope",
+  "neither",
+  "nor",
+  "without",
+  ...[...CONTRACTION_STEMS].map((stem) => `${stem}t`),
+]);
+
+/**
+ * How many words before the phrase are read for a negation.
+ *
+ * Three reaches a split contraction with a word between it and the phrase, "don't just roll it
+ * back", which is four words to the `roll`. It also reaches back into an unrelated clause often
+ * enough to refuse "I didn't catch that, roll it back". That second cost is accepted: punctuation
+ * does not survive transcription, so there is no clause boundary to stop at, and of the two errors
+ * available a refusal is the safe one. It escalates to the next person on the rota, where the other
+ * error is a production change made on somebody saying not to.
+ */
+const NEGATION_WINDOW = 3;
+
+function isNegation(words: readonly string[], index: number): boolean {
+  const word = words[index];
+  if (word === undefined) return false;
+  if (NEGATORS.has(word)) return true;
+  // A split contraction: a lone t after one of the stems, `couldn t`, `won t`. Checked against the
+  // same set the unpunctuated spellings come from, rather than any word ending in n.
+  return word === "t" && CONTRACTION_STEMS.has(words[index - 1] ?? "");
+}
+
+function negatedBefore(words: readonly string[], start: number): boolean {
+  for (
+    let index = Math.max(0, start - NEGATION_WINDOW);
+    index < start;
+    index += 1
+  ) {
+    if (isNegation(words, index)) return true;
+  }
+  return false;
+}
+
+/**
+ * Where the phrase last begins as a whole run of words, or null when it does not occur.
+ *
+ * Whole words, not characters. Matching inside the joined string let "unroll it backwards" count as
+ * saying "roll it back", because the characters are there even though neither word is.
+ */
+function lastRunStart(
+  words: readonly string[],
+  phrase: readonly string[],
+): number | null {
+  for (let start = words.length - phrase.length; start >= 0; start -= 1) {
+    if (phrase.every((word, offset) => words[start + offset] === word)) {
+      return start;
+    }
+  }
+  return null;
+}
+
 /**
  * Which turn is the responder saying the words an action demanded, or null when no turn is.
  *
- * The last one wins. A conversation can rehearse a phrase before agreeing to it, and the moment
- * that counts is the one they finished on.
+ * The last saying wins. A conversation can rehearse a phrase before agreeing to it, and the moment
+ * that counts is the one they finished on. When the latest turn that says the words says them
+ * negated, there is no grant, and the search does NOT carry on back to an earlier turn that said
+ * them plainly: "Roll it back", then "actually, do not roll it back", has withdrawn the first.
+ * Inside one turn the last saying decides for the same reason.
  *
- * Containment rather than equality, because a person says the phrase inside a sentence: "yes, roll
- * it back then" carries it and an equality test would refuse it. The words themselves, in order,
- * still have to be there.
+ * That withdrawal only works when the responder says the words again. A refusal that does not
+ * repeat them is not seen, which is a known gap and not a design choice. The negation check reads
+ * the words in front of the latest saying and nothing after it, so "Roll it back, actually, don't"
+ * grants, and a turn with no saying in it is skipped, so "Roll it back." followed by "Actually,
+ * don't." grants as well. Catching a trailing refusal needs a check on what follows the phrase, and
+ * the obvious one collides with sayings that are real authorizations, "roll it back, no problem"
+ * and "roll it back, don't wait", so it is left for a deliberate redesign rather than another word
+ * rule.
+ *
+ * A run of whole words rather than equality, because a person says the phrase inside a sentence:
+ * "yes, roll it back then" carries it and an equality test would refuse it. The words themselves,
+ * in order and as words, still have to be there, and not with a negation directly in front of them.
+ *
+ * Until this read words it tested characters in the joined string, so "do not roll it back" counted
+ * as saying it and so did "unroll it backwards". This is the third of the three questions the
+ * authorization gate asks, documented as the check that catches a provider extraction the
+ * transcript does not support, and a refusal is exactly the transcript not supporting it.
+ *
+ * What this still cannot see is a question. "Should I roll it back" normalises to the same words as
+ * "roll it back" once the question mark is gone, and transcription does not reliably keep one. A
+ * rehearsal question followed by a plain saying is handled by the last-one-wins rule. A question
+ * that is the only saying on the call is not.
  *
  * The authorization gate and the deck both read this, which is why it is here rather than in either
  * of them. A gate that acted on a phrase the deck could not find would have nothing to draw the tie
@@ -259,13 +410,18 @@ export function turnGranting(
   transcript: readonly { speaker: string; text: string }[],
   phrase: string,
 ): number | null {
-  const wanted = normalisePhrase(phrase);
-  if (wanted === "") return null;
+  const wanted = wordsOf(phrase);
+  if (wanted.length === 0) return null;
 
   for (let index = transcript.length - 1; index >= 0; index -= 1) {
     const turn = transcript[index];
     if (turn === undefined || turn.speaker !== "user") continue;
-    if (normalisePhrase(turn.text).includes(wanted)) return index;
+
+    const words = wordsOf(turn.text);
+    const start = lastRunStart(words, wanted);
+    if (start === null) continue;
+
+    return negatedBefore(words, start) ? null : index;
   }
   return null;
 }
