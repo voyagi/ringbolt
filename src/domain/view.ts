@@ -372,12 +372,20 @@ function lastRunStart(
 /**
  * Which turn is the responder saying the words an action demanded, or null when no turn is.
  *
- * The last one wins. A conversation can rehearse a phrase before agreeing to it, and the moment
- * that counts is the one they finished on. That rule runs both ways: when the latest turn that says
- * the words at all says them negated, the responder finished on a refusal, so there is no grant and
- * the search does NOT carry on back to an earlier turn that said them plainly. "Roll it back", then
- * "actually, do not roll it back", has withdrawn the first. Inside one turn the last saying decides
- * for the same reason.
+ * The last saying wins. A conversation can rehearse a phrase before agreeing to it, and the moment
+ * that counts is the one they finished on. When the latest turn that says the words says them
+ * negated, there is no grant, and the search does NOT carry on back to an earlier turn that said
+ * them plainly: "Roll it back", then "actually, do not roll it back", has withdrawn the first.
+ * Inside one turn the last saying decides for the same reason.
+ *
+ * That withdrawal only works when the responder says the words again. A refusal that does not
+ * repeat them is not seen, which is a known gap and not a design choice. The negation check reads
+ * the words in front of the latest saying and nothing after it, so "Roll it back, actually, don't"
+ * grants, and a turn with no saying in it is skipped, so "Roll it back." followed by "Actually,
+ * don't." grants as well. Catching a trailing refusal needs a check on what follows the phrase, and
+ * the obvious one collides with sayings that are real authorizations, "roll it back, no problem"
+ * and "roll it back, don't wait", so it is left for a deliberate redesign rather than another word
+ * rule.
  *
  * A run of whole words rather than equality, because a person says the phrase inside a sentence:
  * "yes, roll it back then" carries it and an equality test would refuse it. The words themselves,
