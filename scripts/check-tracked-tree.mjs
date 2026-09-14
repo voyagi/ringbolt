@@ -30,6 +30,7 @@ const ALLOWED_DIRS = new Set([
   '.github',
   'design',
   'docs',
+  'examples',
   'migrations',
   'scripts',
   'src',
