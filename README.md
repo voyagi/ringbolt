@@ -12,6 +12,9 @@ spoken authorization is verified against the transcript, and the release is roll
 deployment answers calls with the local stand-in rather than dialling, so nothing on it can make a
 telephone ring.
 
+**Or watch it: [the video walkthrough](https://www.youtube.com/watch?v=EIm87clsks8)**, just over two
+minutes on that same demo, from the broken release to the rollback and the call it refused.
+
 ## Why this exists
 
 Every on-call tool can already phone you. None of them can have a conversation.
