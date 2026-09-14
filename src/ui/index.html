@@ -10,6 +10,27 @@
     />
     <meta name="color-scheme" content="dark light" />
     <meta name="robots" content="noindex" />
+    <!-- Link previews, for when the address is pasted somewhere that unfurls it. The image URL is
+         absolute because crawlers do not resolve a relative one, and it names the public demo
+         because that is the address this product is shared under. -->
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:title"
+      content="Ringbolt: the on-call line that talks back"
+    />
+    <meta
+      property="og:description"
+      content="A phone-call agent for on-call engineering. It phones the engineer on call, talks the incident through, and runs only the fix they authorize out loud."
+    />
+    <meta
+      property="og:image"
+      content="https://ringbolt.taranity.com/card.png"
+    />
+    <meta
+      property="og:image:alt"
+      content="Ringbolt: the on-call line that talks back."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="/mark.svg" type="image/svg+xml" />
     <script>
       // Before the first paint, or the deck flashes the wrong theme on every load. It runs ahead of

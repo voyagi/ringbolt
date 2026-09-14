@@ -1,3 +1,5 @@
+![Ringbolt. The on-call line that talks back. It phones the engineer on call, talks the incident through, and runs only the fix they authorize out loud.](docs/media/card.png)
+
 # Ringbolt
 
 A phone-call agent for on-call engineering. It phones a human when production breaks, talks the
