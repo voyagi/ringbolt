@@ -1,7 +1,9 @@
+![Ringbolt. The on-call line that talks back. It phones the engineer on call, talks the incident through, and runs only the fix they authorize out loud.](docs/media/card.png)
+
 # Ringbolt
 
-The on-call line that phones a human when production breaks, talks the incident through with
-them, and then carries out the fix they authorize out loud.
+A phone-call agent for on-call engineering. It phones a human when production breaks, talks the
+incident through with them, and then carries out the fix they authorize out loud.
 
 A ringbolt is the iron ring bolted into a quay that a ship ties to in a storm.
 
@@ -14,6 +16,9 @@ telephone ring.
 
 **Or watch it: [the video walkthrough](https://www.youtube.com/watch?v=EIm87clsks8)**, just over two
 minutes on that same demo, from the broken release to the rollback and the call it refused.
+
+**Or just read it: [examples/demo-transcript.md](examples/demo-transcript.md)**, the same
+walkthrough in words, about a minute, nothing to open.
 
 ## Why this exists
 
