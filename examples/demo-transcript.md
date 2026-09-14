@@ -23,7 +23,10 @@ Ringbolt's local stand-in, running the same loop as the live build. Dockside is 
 owns. Bad release, going out now.
 
 > On `/demo` this is the control labelled **Break dockside**. The readout beside it turns to
-> FAILING, and an alert lands on the intake endpoint the same way any monitor would send one.
+> FAILING and the service raises its own alert, which goes through the same orchestrator every
+> other alert does. The one thing it skips is the HTTP intake endpoint, because that needs the
+> intake token and this control has to work for a stranger with no credentials at all. So intake
+> authentication, rate limiting and payload validation are not what this walkthrough exercises.
 
 ## The call
 
@@ -49,9 +52,11 @@ Voice is a lossy channel, so Ringbolt never acts on a guess. This example call c
 at high confidence, with a valid decision to change production. It never ran. Not one word from the
 person who answered was transcribed. No evidence, no action.
 
-The real telephone path is built too. But the provider does not currently dial the Netherlands, and
-the repository documents exactly that, with call ids, in
-[docs/two-way-audio.md](../docs/two-way-audio.md).
+The real telephone path is built too. What stopped it is narrower than it sounds: the provider
+refused the call setup Ringbolt reported, with the words "Calls to the Netherlands in English are
+not supported for this call setup", while their own published region table still lists that
+destination. The repository treats that as one observation rather than a rule about their API, and
+records it with the call ids in [docs/two-way-audio.md](../docs/two-way-audio.md).
 
 ## The rest of the rota
 
